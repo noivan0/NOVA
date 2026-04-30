@@ -1,0 +1,194 @@
+<svg width="900" height="444" viewBox="0 0 900 444" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="g" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M30,0 L0,0 0,30" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="a1" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#6366f1"/>
+    </marker>
+    <marker id="a2" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#22d3ee"/>
+    </marker>
+    <marker id="a3" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#64748b"/>
+    </marker>
+    <marker id="a4" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#34d399"/>
+    </marker>
+    <marker id="a5" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 z" fill="#fbbf24"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="444" fill="#020617"/>
+  <rect width="900" height="444" fill="url(#g)"/>
+
+  <!-- Header -->
+  <text x="450" y="28" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="20" fill="#e2e8f0" font-weight="bold" letter-spacing="4">NOVA</text>
+  <text x="450" y="47" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="10" fill="#475569">AI Orchestration Framework · Define workflows in YAML · Run reliably · Self-improving over time</text>
+
+  <!-- Column labels -->
+  <text x="110" y="64" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#6366f1" font-weight="bold">INPUT</text>
+  <text x="430" y="64" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#22d3ee" font-weight="bold">NOVA ENGINE</text>
+  <text x="772" y="64" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#34d399" font-weight="bold">OUTPUT</text>
+
+  <!-- ── LEFT: INPUT ── -->
+
+  <!-- CLI command -->
+  <rect x="15" y="70" width="190" height="38" rx="5" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+  <text x="25" y="85" font-family="'Courier New',Courier,monospace" font-size="8.5" fill="#64748b">$ nova run research \</text>
+  <text x="25" y="101" font-family="'Courier New',Courier,monospace" font-size="8.5" fill="#a5b4fc">  --context topic="AI agents"</text>
+
+  <!-- Arrow CLI → yaml -->
+  <line x1="110" y1="108" x2="110" y2="120" stroke="#6366f1" stroke-width="1.2" marker-end="url(#a1)"/>
+
+  <!-- harness.yaml box -->
+  <rect x="15" y="122" width="190" height="218" rx="6" fill="#0f172a" stroke="#6366f1" stroke-width="1.5"/>
+  <rect x="15" y="122" width="190" height="22" rx="6" fill="rgba(99,102,241,0.15)"/>
+  <text x="110" y="137" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9.5" fill="#818cf8" font-weight="bold">harness.yaml</text>
+
+  <text x="28" y="157" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">name: research</text>
+  <text x="28" y="171" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">pattern: fanout</text>
+  <text x="28" y="185" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">persona: "expert researcher"</text>
+  <text x="28" y="201" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">phases:</text>
+  <text x="36" y="215" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">- id: web_search</text>
+  <text x="44" y="229" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">executor: llm</text>
+  <text x="44" y="243" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">quality_check: true</text>
+  <text x="44" y="257" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">on_failure: retry</text>
+  <text x="36" y="271" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">- id: synthesis</text>
+  <text x="44" y="285" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">input_files: [web_search.md]</text>
+  <text x="28" y="301" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">runbook:</text>
+  <text x="36" y="315" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">- symptom: timeout</text>
+  <text x="44" y="329" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">action: notify</text>
+
+  <!-- Arrow INPUT → ENGINE -->
+  <line x1="205" y1="228" x2="218" y2="228" stroke="#6366f1" stroke-width="1.5" marker-end="url(#a1)"/>
+
+  <!-- ── CENTER: NOVA ENGINE ── -->
+
+  <!-- Engine border -->
+  <rect x="220" y="70" width="420" height="354" rx="8" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+  <rect x="220" y="70" width="420" height="24" rx="8" fill="rgba(34,211,238,0.08)"/>
+  <text x="400" y="86" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="10" fill="#22d3ee" font-weight="bold">Orchestrator</text>
+
+  <!-- Checkpoint badge -->
+  <rect x="540" y="76" width="92" height="16" rx="4" fill="rgba(167,139,250,0.12)" stroke="#a78bfa" stroke-width="0.8"/>
+  <text x="586" y="87" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#a78bfa">&#x21BA; Checkpoint</text>
+
+  <!-- Config layer -->
+  <rect x="232" y="102" width="396" height="22" rx="4" fill="rgba(30,41,59,0.8)" stroke="#1e293b" stroke-width="1"/>
+  <text x="430" y="116" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">Config: nova.yaml + NOVA_* env  &#x2192;  LLM · Notifier · Publisher · KB</text>
+
+  <!-- Harness Loader -->
+  <rect x="232" y="132" width="396" height="20" rx="4" fill="rgba(30,41,59,0.5)" stroke="#334155" stroke-width="0.8"/>
+  <text x="430" y="145" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">HarnessLoader &#x2192; parse &amp; validate harness.yaml &#x2192; resolve phases, pattern, runbook</text>
+
+  <!-- Phase 1 -->
+  <rect x="232" y="160" width="196" height="62" rx="5" fill="#0f172a" stroke="#34d399" stroke-width="1.2"/>
+  <rect x="232" y="160" width="196" height="62" rx="5" fill="rgba(52,211,153,0.07)"/>
+  <text x="330" y="177" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#34d399" font-weight="bold">Phase 1: web_search</text>
+  <text x="330" y="191" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">executor: llm · timeout: 120s</text>
+  <text x="330" y="205" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">prompt &#x2192; LLM &#x2192; web_search.md</text>
+  <text x="330" y="217" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#1e293b">checkpoint.update(1, "web_search")</text>
+
+  <!-- Arrow Phase1 → QG -->
+  <line x1="330" y1="222" x2="330" y2="236" stroke="#34d399" stroke-width="1" marker-end="url(#a4)"/>
+  <text x="344" y="232" font-family="'Courier New',Courier,monospace" font-size="7" fill="#334155">context[_phase_web_search]</text>
+
+  <!-- Quality Gate -->
+  <rect x="252" y="238" width="156" height="32" rx="5" fill="#0f172a" stroke="#f59e0b" stroke-width="1.2"/>
+  <rect x="252" y="238" width="156" height="32" rx="5" fill="rgba(245,158,11,0.08)"/>
+  <text x="330" y="252" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#fbbf24" font-weight="bold">Quality Gate</text>
+  <text x="330" y="264" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#64748b">SCORE &#x2265; 70 &#x2192; pass · else retry(N)</text>
+
+  <!-- Arrow QG → Phase2 -->
+  <line x1="330" y1="270" x2="330" y2="282" stroke="#fbbf24" stroke-width="1" marker-end="url(#a5)"/>
+
+  <!-- Phase 2 -->
+  <rect x="232" y="284" width="196" height="50" rx="5" fill="#0f172a" stroke="#34d399" stroke-width="1.2"/>
+  <rect x="232" y="284" width="196" height="50" rx="5" fill="rgba(52,211,153,0.07)"/>
+  <text x="330" y="301" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#34d399" font-weight="bold">Phase 2: synthesis</text>
+  <text x="330" y="315" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">input_files: [web_search.md]</text>
+  <text x="330" y="328" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">&#x2192; report.md</text>
+
+  <!-- RunBook (right, spans phase 1+2 area) -->
+  <rect x="440" y="160" width="190" height="76" rx="5" fill="#0f172a" stroke="#fb7185" stroke-width="1.2" stroke-dasharray="4,2"/>
+  <rect x="440" y="160" width="190" height="76" rx="5" fill="rgba(251,113,133,0.05)"/>
+  <text x="535" y="177" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#fb7185" font-weight="bold">RunBook</text>
+  <text x="535" y="191" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">failure recovery rules</text>
+  <text x="535" y="205" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#64748b">symptom: "timeout"</text>
+  <text x="535" y="218" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#475569">action: wait:60 | notify | shell</text>
+  <text x="535" y="230" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#64748b">3+ consecutive fails &#x2192; auto-alert</text>
+
+  <!-- Phase executors legend (right, below runbook) -->
+  <rect x="440" y="248" width="190" height="86" rx="5" fill="rgba(30,41,59,0.4)" stroke="#1e293b" stroke-width="1"/>
+  <text x="535" y="264" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8.5" fill="#64748b" font-weight="bold">Phase Executors</text>
+  <text x="453" y="279" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">llm</text>
+  <text x="480" y="279" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">&#x2192; LLM call, saves output file</text>
+  <text x="453" y="293" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">shell</text>
+  <text x="488" y="293" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">&#x2192; subprocess.run(cmd)</text>
+  <text x="453" y="307" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">python</text>
+  <text x="497" y="307" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">&#x2192; exec(code), ctx injected</text>
+  <text x="453" y="321" font-family="'Courier New',Courier,monospace" font-size="8" fill="#94a3b8">passthrough</text>
+  <text x="535" y="321" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">&#x2192; forward context</text>
+
+  <!-- KB box (bottom left) -->
+  <rect x="232" y="344" width="190" height="60" rx="5" fill="#0f172a" stroke="#a78bfa" stroke-width="1.2"/>
+  <rect x="232" y="344" width="190" height="60" rx="5" fill="rgba(167,139,250,0.07)"/>
+  <text x="327" y="361" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#a78bfa" font-weight="bold">Knowledge Base (KB)</text>
+  <text x="327" y="375" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">READ: {{kb:projects/…}} in prompts</text>
+  <text x="327" y="389" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">WRITE: append_log() after each run</text>
+  <text x="327" y="399" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#334155">persists across all runs &#x2192; growing context</text>
+
+  <!-- Evolution box (bottom right) -->
+  <rect x="434" y="344" width="196" height="60" rx="5" fill="#0f172a" stroke="#fb923c" stroke-width="1.2"/>
+  <rect x="434" y="344" width="196" height="60" rx="5" fill="rgba(251,146,60,0.07)"/>
+  <text x="532" y="361" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#fb923c" font-weight="bold">Evolution Log</text>
+  <text x="532" y="375" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">evolution.md &#x2192; human-readable history</text>
+  <text x="532" y="389" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#475569">evolution.jsonl &#x2192; programmatic queries</text>
+  <text x="532" y="399" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#334155">quality scores · failure rate · trends</text>
+
+  <!-- Arrow ENGINE → OUTPUT -->
+  <line x1="640" y1="248" x2="657" y2="248" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#a2)"/>
+
+  <!-- ── RIGHT: OUTPUT ── -->
+
+  <rect x="659" y="70" width="228" height="354" rx="8" fill="#0f172a" stroke="#34d399" stroke-width="1.2"/>
+  <rect x="659" y="70" width="228" height="24" rx="8" fill="rgba(52,211,153,0.08)"/>
+  <text x="773" y="86" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="10" fill="#34d399" font-weight="bold">Output</text>
+
+  <!-- workspace -->
+  <rect x="671" y="102" width="204" height="52" rx="4" fill="rgba(30,41,59,0.6)" stroke="#334155" stroke-width="1"/>
+  <text x="773" y="118" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#94a3b8" font-weight="bold">workspace/research/</text>
+  <text x="773" y="132" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">web_search.md · report.md</text>
+  <text x="773" y="146" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#475569">checkpoint.json (cleared on success)</text>
+
+  <!-- Publisher -->
+  <rect x="671" y="164" width="204" height="52" rx="4" fill="rgba(6,78,59,0.2)" stroke="#34d399" stroke-width="1"/>
+  <text x="773" y="180" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#34d399" font-weight="bold">Publisher</text>
+  <text x="773" y="194" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">WordPress · Ghost · File · None</text>
+  <text x="773" y="208" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#475569">returns published URL on success</text>
+
+  <!-- Notifier -->
+  <rect x="671" y="226" width="204" height="52" rx="4" fill="rgba(8,51,68,0.3)" stroke="#22d3ee" stroke-width="1"/>
+  <text x="773" y="242" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#22d3ee" font-weight="bold">Notifier</text>
+  <text x="773" y="256" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">Telegram · Slack · Discord · Webhook</text>
+  <text x="773" y="270" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#475569">auto-alert on N consecutive failures</text>
+
+  <!-- Evolution result -->
+  <rect x="671" y="288" width="204" height="52" rx="4" fill="rgba(120,53,15,0.15)" stroke="#fb923c" stroke-width="1"/>
+  <text x="773" y="304" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#fb923c" font-weight="bold">Evolution Log</text>
+  <text x="773" y="318" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">quality score · duration · phases</text>
+  <text x="773" y="332" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#475569">failure_rate() · consecutive_failures()</text>
+
+  <!-- KB persisted -->
+  <rect x="671" y="350" width="204" height="52" rx="4" fill="rgba(76,29,149,0.15)" stroke="#a78bfa" stroke-width="1"/>
+  <text x="773" y="366" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="9" fill="#a78bfa" font-weight="bold">Knowledge Base (KB)</text>
+  <text x="773" y="380" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8" fill="#64748b">kb/log.md · kb/projects/ · kb/config/</text>
+  <text x="773" y="394" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="7.5" fill="#475569">context injection on next run</text>
+
+  <!-- Footer -->
+  <line x1="20" y1="432" x2="880" y2="432" stroke="#1e293b" stroke-width="0.5"/>
+  <text x="450" y="440" text-anchor="middle" font-family="'Courier New',Courier,monospace" font-size="8.5" fill="#334155">Zero infrastructure · Pure Python + YAML · Resumable · Self-improving</text>
+</svg>

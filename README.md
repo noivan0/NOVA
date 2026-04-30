@@ -12,6 +12,10 @@
   <img src="https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic%20%7C%20Ollama-orange?style=flat-square" alt="LLM Providers"/>
 </p>
 
+<p align="center">
+  <img src="docs/nova-workflow.svg" alt="NOVA Workflow Diagram" width="900"/>
+</p>
+
 ---
 
 ## What is NOVA?
@@ -691,6 +695,24 @@ nova new code-review --pattern pipeline
 # Edit harnesses/code-review/harness.yaml
 nova run code-review --context pr_diff="$(git diff main)"
 ```
+
+---
+
+## Architecture
+
+<p align="center">
+  <img src="docs/nova-architecture-detail.svg" alt="NOVA Architecture Detail" width="900"/>
+</p>
+
+The diagram above shows:
+- **Context lifecycle** — how data flows from your `--context` flag through every phase
+- **Checkpoint state machine** — start → update per phase → stale check → complete
+- **KB bidirectional flow** — `{{kb:…}}` injected into prompts; results written back after each run
+- **Evolution dual output** — human-readable Markdown + machine-queryable JSONL side by side
+- **4 execution patterns** — pipeline, fanout, supervisor, generative
+- **Provider abstraction** — swap LLM / Notifier / Publisher with one config line
+
+For a full architecture walkthrough see [docs/architecture.md](docs/architecture.md).
 
 ---
 

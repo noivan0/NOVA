@@ -1,5 +1,9 @@
 # NOVA Architecture — Deep Dive
 
+<p align="center">
+  <img src="../docs/nova-architecture-detail.svg" alt="NOVA Architecture Detail" width="860"/>
+</p>
+
 ## Design Principles
 
 1. **Single-agent first** — works with one agent, one LLM provider, one process
@@ -172,6 +176,105 @@ kb.write("projects/my-harness/last-run", f"Topic: {context['topic']}\nScore: 82"
 # Read prior context in the next run
 prior = kb.read("projects/my-harness/last-run") or ""
 ```
+
+---
+
+## KB Bidirectional Flow
+
+The KB feeds prompts and receives results — this is the core of NOVA's self-improvement loop.
+
+```
+              ┌────────────────────────────┐
+              │         harness.yaml       │
+              │  prompt: |                 │
+              │    {{kb:projects/topic}}   │  ← KB injected into every prompt
+              └────────────┬───────────────┘
+                           │ KB.read() at phase start
+                           ▼
+              ┌────────────────────────────┐
+              │      LLM Phase runs        │
+              │      produces output       │
+              └────────────┬───────────────┘
+                           │ after phase / run completion
+                           ▼
+              ┌────────────────────────────┐
+              │  KB.append_log()           │  ← one-line entry in kb/log.md
+              │  KB.write("projects/…")    │  ← store analysis, notes, errors
+              └────────────────────────────┘
+```
+
+**Growing context loop:** Run 1 writes basic notes. Run 2 reads those notes before prompting the LLM — producing richer output. The harness improves automatically without any code change.
+
+**Prompt injection syntax:** Use `{{kb:key}}` in prompt files or harness.yaml prompts:
+
+```yaml
+phases:
+  - id: research
+    executor: llm
+    prompt: |
+      Use the following prior research when writing this report:
+      {{kb:projects/my-topic-research}}
+
+      Now research: {{topic}}
+```
+
+**Search across the KB:** Use `kb.search("keyword")` to find relevant pages before deciding what to inject.
+
+---
+
+## Context Lifecycle
+
+`context` is a plain Python `dict` that flows through every phase of a run.
+
+```
+nova run research --context topic="AI agents" format="long-form"
+          │
+          ▼
+ctx = {
+  "topic": "AI agents",          ← from --context flags
+  "format": "long-form",
+  "_publisher": <Publisher>,     ← injected by Orchestrator at startup
+  "_kb": <KB>,                   ← available to python phases
+  "_notifier": <Notifier>        ← available to python phases
+}
+          │
+          ▼  Phase 1 (web_search) completes
+ctx["_phase_web_search"] = "<full LLM output>"   ← available to all later phases
+          │
+          ▼  Phase 2 (synthesis) prompt uses: {{_phase_web_search}}
+ctx["_last_quality_score"] = 88                  ← tracked for evolution log
+          │
+          ▼  Run complete
+  context is discarded — persisted data lives in workspace/ and kb/
+```
+
+**Serialization rule:** Only primitive values (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`) are serialized to `checkpoint.json`. Keys starting with `_` (like `_publisher`) are excluded and rebuilt fresh on resume.
+
+---
+
+## Checkpoint Lifecycle
+
+```
+nova run …
+    │
+    ├─ checkpoint.exists() ?
+    │      │
+    │      ├─ YES → checkpoint.resume()
+    │      │           │
+    │      │           ├─ stale? (phase_started_at + stale_threshold_secs < now)
+    │      │           │     └─ YES → checkpoint.complete() → restart from phase 0
+    │      │           │
+    │      │           └─ fresh? → skip phases 0..N-1 → resume from phase N
+    │      │
+    │      └─ NO  → checkpoint.start()  → new run_id, phase=0
+    │
+    ├─ [per phase] checkpoint.update(phase_index, phase_id, serializable_ctx)
+    │
+    └─ success → checkpoint.complete()  → checkpoint.json deleted
+```
+
+`stale_threshold_secs` defaults to `phase_timeout` from config (default: 300s).
+If a phase hangs or the process is killed, the next run detects the stale checkpoint and restarts cleanly.
 
 ---
 
