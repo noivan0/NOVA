@@ -1,4 +1,9 @@
 pyyaml>=6.0
-# LLM providers (install the one you need):
-# openai>=1.0
-# anthropic>=0.20
+
+# LLM providers — install the one you need:
+# openai>=2.0        (GPT-4o, GPT-4.1, o3, o4-mini, ...)
+# anthropic>=0.97    (claude-opus-4-6, claude-sonnet-4-6, ...)
+# ollama>=0.6        (llama3.3, gemma3, qwen3, deepseek-r2, ...)
+
+# Or install all at once:
+# pip install nova-orchestrator[all]

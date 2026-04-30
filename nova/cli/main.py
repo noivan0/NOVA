@@ -55,6 +55,7 @@ def main() -> None:
 
     # --- kb ---
     kb_p = sub.add_parser("kb", help="Knowledge base operations")
+    kb_p.add_argument("--config", default="nova.yaml", help="Config file path")
     kb_sub = kb_p.add_subparsers(dest="kb_command", required=True)
 
     kb_search = kb_sub.add_parser("search", help="Search the KB")
@@ -70,6 +71,7 @@ def main() -> None:
     # --- new ---
     new_p = sub.add_parser("new", help="Scaffold a new harness")
     new_p.add_argument("name", help="Harness name (lowercase-hyphenated)")
+    new_p.add_argument("--config", default="nova.yaml", help="Config file path")
     new_p.add_argument("--pattern", default="pipeline",
                        choices=["pipeline", "fanout", "supervisor", "generative"],
                        help="Execution pattern")
@@ -175,7 +177,7 @@ def main() -> None:
     # kb
     # ------------------------------------------------------------------ #
     elif args.command == "kb":
-        cfg = load_config(getattr(args, "config", "nova.yaml"))
+        cfg = load_config(args.config)
         kb = KB(cfg.kb.path)
 
         if args.kb_command == "search":
@@ -200,7 +202,7 @@ def main() -> None:
     # new
     # ------------------------------------------------------------------ #
     elif args.command == "new":
-        cfg = load_config(getattr(args, "config", "nova.yaml"))
+        cfg = load_config(args.config)
         _scaffold_harness(args.name, args.pattern, cfg.harnesses_dir)
 
 

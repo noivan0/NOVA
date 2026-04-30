@@ -33,6 +33,7 @@ from nova.core.harness import HarnessDefinition, PhaseDefinition
 from nova.core.kb import KB
 from nova.providers.llm import get_llm_provider
 from nova.providers.notifier import get_notifier
+from nova.providers.publisher import get_publisher
 
 
 class PhaseResult:
@@ -56,6 +57,9 @@ class Orchestrator:
         self.config = config
         self.llm = get_llm_provider(config.llm)
         self.notifier = get_notifier(config.notifier)
+        # FIX M4: instantiate publisher at orchestrator level so harness python
+        # phases can access it via context["_publisher"] without importing nova internals
+        self.publisher = get_publisher(config.publisher)
         self.kb = KB(config.kb.path)
 
     def run(
@@ -99,26 +103,34 @@ class Orchestrator:
         runbook_fired: List[str] = []
         final_quality: Optional[int] = None
 
+        # FIX M4: inject publisher into context so python phases don't need to import nova
+        ctx = context or {}
+        ctx.setdefault("_publisher", self.publisher)
+
         # Dispatch by pattern
         if harness.pattern in ("pipeline", "generative", "supervisor"):
             success = self._run_pipeline(
-                harness, workspace, checkpoint, context or {},
+                harness, workspace, checkpoint, ctx,
                 start_phase, phases_run, phases_failed, runbook_fired,
             )
         elif harness.pattern == "fanout":
             success = self._run_fanout(
-                harness, workspace, checkpoint, context or {},
-                phases_run, phases_failed,
+                harness, workspace, checkpoint, ctx,
+                start_phase, phases_run, phases_failed,
             )
         else:
             print(f"[nova] Unknown pattern '{harness.pattern}', defaulting to pipeline")
             success = self._run_pipeline(
-                harness, workspace, checkpoint, context or {},
+                harness, workspace, checkpoint, ctx,
                 start_phase, phases_run, phases_failed, runbook_fired,
             )
 
         duration = time.monotonic() - t0
         checkpoint.complete()
+
+        # FIX H5: collect final quality score from last scored phase
+        # (quality_score on individual phases is tracked per-run in phases_run context)
+        final_quality = ctx.get("_last_quality_score")
 
         # Record evolution
         if harness.evolution.enabled:
@@ -178,7 +190,13 @@ class Orchestrator:
                 phases_run.append(phase.id)
                 continue
 
-            checkpoint.update(i, phase.id, {"context": context})
+            # Serialize only string/primitive context values to checkpoint
+            # (objects like _publisher are non-serializable and rebuilt at startup)
+            serializable_ctx = {
+                k: v for k, v in context.items()
+                if not k.startswith("_") and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+            }
+            checkpoint.update(i, phase.id, {"context": serializable_ctx})
             result = self._execute_phase(phase, workspace, context, harness)
             phases_run.append(phase.id)
 
@@ -205,6 +223,9 @@ class Orchestrator:
 
             # Update context for next phase
             context[f"_phase_{phase.id}"] = result.output
+            # Track last quality score for evolution log (FIX H5)
+            if result.quality_score is not None:
+                context["_last_quality_score"] = result.quality_score
 
         return True
 
@@ -218,17 +239,29 @@ class Orchestrator:
         workspace: Path,
         checkpoint: Checkpoint,
         context: Dict[str, Any],
+        start_phase: int,
         phases_run: List[str],
         phases_failed: List[str],
     ) -> bool:
         """
         In single-agent mode, fanout phases run sequentially then
         results are merged into context['_fanout_results'].
+        FIX C3: start_phase respected so resume works for fanout harnesses.
         """
         fanout_results = {}
 
         for i, phase in enumerate(harness.phases):
-            checkpoint.update(i, phase.id, {"context": context})
+            if i < start_phase:
+                print(f"[nova] Skipping phase {i} ({phase.id}) — already done")
+                phases_run.append(phase.id)
+                continue
+
+            # Serialize only primitive context values to checkpoint
+            serializable_ctx = {
+                k: v for k, v in context.items()
+                if not k.startswith("_") and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+            }
+            checkpoint.update(i, phase.id, {"context": serializable_ctx})
             result = self._execute_phase(phase, workspace, context, harness)
             phases_run.append(phase.id)
 
@@ -238,6 +271,8 @@ class Orchestrator:
                     out = workspace / phase.output_file
                     out.parent.mkdir(parents=True, exist_ok=True)
                     out.write_text(result.output)
+                if result.quality_score is not None:
+                    context["_last_quality_score"] = result.quality_score
             else:
                 phases_failed.append(phase.id)
                 print(f"[nova] Fanout phase {phase.id} failed — continuing others")
@@ -329,8 +364,16 @@ class Orchestrator:
             print(f"[nova][dry-run] LLM prompt ({len(prompt)} chars)")
             return PhaseResult(phase.id, True, output=f"[dry-run] phase={phase.id}")
 
-        output = self.llm.complete(prompt, timeout=timeout)
-        return PhaseResult(phase.id, True, output=output)
+        # FIX H2: pass harness persona as system prompt
+        system = harness.persona or ""
+        output = self.llm.complete(prompt, system=system, timeout=timeout)
+
+        # FIX C2: parse quality score from LLM output when quality_check is set
+        quality_score: Optional[int] = None
+        if phase.quality_check:
+            quality_score = _parse_quality_score(output)
+
+        return PhaseResult(phase.id, True, output=output, quality_score=quality_score)
 
     def _exec_shell(
         self,
@@ -367,7 +410,8 @@ class Orchestrator:
         """Execute inline Python code defined in phase.command."""
         local_vars: Dict[str, Any] = {"workspace": workspace, "context": context, "output": ""}
         try:
-            exec(phase.command, {}, local_vars)  # noqa: S102
+            # FIX C1: pass __builtins__ so imports inside the snippet work
+            exec(phase.command, {"__builtins__": __builtins__}, local_vars)  # noqa: S102
             return PhaseResult(phase.id, True, output=str(local_vars.get("output", "")))
         except Exception as e:
             return PhaseResult(phase.id, False, error=str(e))
@@ -414,3 +458,30 @@ class Orchestrator:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_quality_score(text: str) -> Optional[int]:
+    """
+    FIX C2: Extract a numeric quality score (0-100) from LLM output.
+
+    Looks for patterns like:
+      SCORE: 85
+      Quality: 72/100
+      quality_score: 90
+      [SCORE=88]
+    Returns None if no score found (gate is skipped, not failed).
+    """
+    import re
+    patterns = [
+        r"(?:SCORE|quality[_\s]?score|score)\s*[:=]\s*(\d{1,3})",
+        r"(\d{1,3})\s*/\s*100",
+        r"\[SCORE=(\d{1,3})\]",
+        r"(\d{1,3})\s*(?:out of|\/)\s*100",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            val = int(m.group(1))
+            if 0 <= val <= 100:
+                return val
+    return None

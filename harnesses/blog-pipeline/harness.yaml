@@ -55,12 +55,9 @@ phases:
     description: "Write final post to the configured publisher"
     executor: python
     command: |
-      from nova.core.config import load_config
-      from nova.providers.publisher import get_publisher
-      from pathlib import Path
-
-      cfg = load_config()
-      publisher = get_publisher(cfg.publisher)
+      # FIX M4: use _publisher from context (injected by orchestrator) instead of
+      # importing nova internals directly — keeps harness portable and decoupled
+      publisher = context["_publisher"]
 
       final = (workspace / "final_post.md").read_text()
       title = context.get("title", "Untitled Post")

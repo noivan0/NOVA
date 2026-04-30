@@ -141,7 +141,8 @@ class GhostPublisher(Publisher):
             json.dumps({"exp": now + 300, "iat": now, "aud": "/admin/"}).encode()
         ).rstrip(b"=").decode()
         sig_input = f"{header}.{payload}".encode()
-        sig = hmac.new(bytes.fromhex(secret), sig_input, hashlib.sha256).digest()
+        # FIX M3: use hmac.HMAC() constructor explicitly (hmac.new is an alias but less clear)
+        sig = hmac.HMAC(bytes.fromhex(secret), sig_input, hashlib.sha256).digest()
         sig_b64 = base64.urlsafe_b64encode(sig).rstrip(b"=").decode()
         return f"{header}.{payload}.{sig_b64}"
 

@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "nova-orchestrator"
@@ -28,15 +28,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openai = ["openai>=1.0"]
-anthropic = ["anthropic>=0.20"]
-ollama = []          # Uses built-in urllib — no extra deps
-all = ["openai>=1.0", "anthropic>=0.20"]
+openai = ["openai>=2.0"]
+anthropic = ["anthropic>=0.97"]
+ollama = ["ollama>=0.6"]
+all = ["openai>=2.0", "anthropic>=0.97", "ollama>=0.6"]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
-    "openai>=1.0",
-    "anthropic>=0.20",
+    "openai>=2.0",
+    "anthropic>=0.97",
+    "ollama>=0.6",
     "black",
     "ruff",
     "mypy",

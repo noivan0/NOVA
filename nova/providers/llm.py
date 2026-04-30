@@ -47,18 +47,24 @@ class LLMProvider(ABC):
 class OpenAIProvider(LLMProvider):
     """
     Works with:
-      - OpenAI (api.openai.com)
+      - OpenAI (api.openai.com) — openai>=2.0
       - Custom/enterprise OpenAI-compatible endpoints (set base_url)
       - Azure OpenAI (set base_url to Azure endpoint)
+
+    Reasoning models (o1, o3, o4-mini, o1-mini, o1-preview):
+      temperature is not supported; use max_completion_tokens instead of max_tokens.
     """
+
+    # Models that use the Responses API reasoning parameter set
+    _REASONING_PREFIXES = ("o1", "o3", "o4")
 
     def __init__(self, cfg: LLMConfig):
         try:
             from openai import OpenAI
         except ImportError:
-            raise ImportError("openai package required: pip install openai")
+            raise ImportError("openai package required: pip install 'openai>=2.0'")
 
-        kwargs = {"api_key": cfg.api_key or "sk-placeholder"}
+        kwargs = {"api_key": cfg.api_key or "***"}
         if cfg.base_url:
             kwargs["base_url"] = cfg.base_url
 
@@ -67,29 +73,36 @@ class OpenAIProvider(LLMProvider):
         self.max_tokens = cfg.max_tokens
         self.temperature = cfg.temperature
 
+    def _is_reasoning_model(self) -> bool:
+        """Detect o1/o3/o4-series models that don't support temperature."""
+        return any(self.model.startswith(p) for p in self._REASONING_PREFIXES)
+
     def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            timeout=timeout,
-        )
+        kwargs: dict = {"model": self.model, "messages": messages, "timeout": timeout}
+        # FIX H3: reasoning models use max_completion_tokens and don't support temperature
+        if self._is_reasoning_model():
+            kwargs["max_completion_tokens"] = self.max_tokens
+        else:
+            kwargs["max_tokens"] = self.max_tokens
+            kwargs["temperature"] = self.temperature
+
+        resp = self.client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content or ""
 
     def chat(self, messages: list, timeout: int = 120) -> str:
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            timeout=timeout,
-        )
+        kwargs: dict = {"model": self.model, "messages": messages, "timeout": timeout}
+        if self._is_reasoning_model():
+            kwargs["max_completion_tokens"] = self.max_tokens
+        else:
+            kwargs["max_tokens"] = self.max_tokens
+            kwargs["temperature"] = self.temperature
+
+        resp = self.client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content or ""
 
 
@@ -102,7 +115,7 @@ class AnthropicProvider(LLMProvider):
         try:
             import anthropic
         except ImportError:
-            raise ImportError("anthropic package required: pip install anthropic")
+            raise ImportError("anthropic package required: pip install 'anthropic>=0.97'")
 
         self.client = anthropic.Anthropic(api_key=cfg.api_key)
         self.model = cfg.model
@@ -113,6 +126,7 @@ class AnthropicProvider(LLMProvider):
             "model": self.model,
             "max_tokens": self.max_tokens,
             "messages": [{"role": "user", "content": prompt}],
+            "timeout": timeout,  # FIX H4: pass timeout to API call
         }
         if system:
             kwargs["system"] = system
@@ -126,11 +140,42 @@ class AnthropicProvider(LLMProvider):
 # --------------------------------------------------------------------------- #
 
 class OllamaProvider(LLMProvider):
+    """
+    Local Ollama inference — uses the official ollama Python SDK when available,
+    falling back to raw HTTP for environments without it.
+
+    Recommended models: llama3.3, gemma3, qwen3, deepseek-r2, mistral
+    Install SDK: pip install ollama>=0.6
+    """
+
     def __init__(self, cfg: LLMConfig):
         self.base_url = cfg.base_url or "http://localhost:11434"
-        self.model = cfg.model
+        self.model = cfg.model or "llama3.3"
+        # Try to import official SDK; fall back to urllib
+        try:
+            import ollama as _sdk  # noqa: F401
+            self._use_sdk = True
+        except ImportError:
+            self._use_sdk = False
 
     def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
+        if self._use_sdk:
+            return self._complete_sdk(prompt, system, timeout)
+        return self._complete_http(prompt, system, timeout)
+
+    def _complete_sdk(self, prompt: str, system: str, timeout: int) -> str:
+        """FIX M1: Use official ollama SDK (ollama>=0.6) when available."""
+        import ollama
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        client = ollama.Client(host=self.base_url)
+        resp = client.chat(model=self.model, messages=messages)
+        return resp.message.content or ""
+
+    def _complete_http(self, prompt: str, system: str, timeout: int) -> str:
+        """Fallback: raw HTTP to /api/generate (compatible with all Ollama versions)."""
         import json
         import urllib.request
 
@@ -145,9 +190,15 @@ class OllamaProvider(LLMProvider):
             data=payload,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-        return data.get("response", "")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read())
+            return data.get("response", "")
+        except Exception as e:
+            raise RuntimeError(
+                f"Ollama request failed ({self.base_url}): {e}. "
+                f"Is Ollama running? Try: ollama serve"
+            ) from e
 
 
 # --------------------------------------------------------------------------- #
