@@ -1,229 +1,445 @@
-# NOVA — Noivan Orchestrated Vanguard Architecture
+# NOVA — AI Orchestration Framework
 
-> **A single-agent AI orchestration framework for autonomous, multi-phase project execution.**
+<p align="center">
+  <b>Define complex AI workflows in YAML. Run them end-to-end with one command.</b><br/>
+  Checkpointing · Quality Gates · Self-improving logs · Pluggable LLM / Publisher / Notifier
+</p>
 
-NOVA lets you define complex AI workflows in a simple YAML file (a *harness*) and run them
-end-to-end with a single command — with checkpointing, quality gates, self-improvement logs,
-and pluggable LLM / publisher / notifier backends.
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+"/>
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
+  <img src="https://img.shields.io/badge/tests-14%20passing-brightgreen?style=flat-square" alt="Tests"/>
+  <img src="https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic%20%7C%20Ollama-orange?style=flat-square" alt="LLM Providers"/>
+</p>
 
 ---
 
-## Core Concepts
+## What is NOVA?
 
-| Concept | What it is |
+NOVA is a **single-agent AI orchestration framework** that lets you define multi-step AI workflows
+in a simple YAML file — called a **harness** — and execute them reliably, end-to-end, with a single command.
+
+Think of it as a CI/CD pipeline for AI tasks: each phase is a step (LLM call, shell command, or Python code),
+phases flow into each other, quality is automatically checked, failures trigger recovery rules,
+and every run is logged so your workflow gets better over time.
+
+```
+nova run blog-pipeline --context title="Why AI will change work" keywords="AI,automation"
+```
+
+That one command: researches the topic → writes an outline → drafts the post → runs a quality check
+→ revises based on feedback → publishes to your blog — and sends you a Telegram notification when done.
+
+---
+
+## Why NOVA?
+
+| Problem | How NOVA solves it |
 |---|---|
-| **Harness** | YAML file defining a workflow — phases, prompts, executors, failure rules |
-| **Phase** | One step: LLM call, shell command, or inline Python |
-| **Checkpoint** | Auto-saved state — resume from the last completed phase if interrupted |
-| **Quality Gate** | Parse a score from LLM output; retry if below threshold |
-| **RunBook** | Automatic recovery rules for known failure modes (rate limits, timeouts, …) |
-| **Evolution Log** | Per-harness run history in Markdown + JSONL — learn from every run |
-| **KB** | Markdown knowledge base — persistent context across runs |
-| **Provider** | Pluggable backends for LLM, notifications, and publishing |
+| LLM calls fail or time out mid-workflow | **Checkpointing** — resume from the exact phase that failed |
+| LLM output quality is inconsistent | **Quality Gates** — auto-score output, retry if below threshold |
+| Hard to know if a workflow is improving | **Evolution Log** — every run is recorded; spot patterns across hundreds of runs |
+| Switching LLM providers requires code changes | **Provider abstraction** — swap OpenAI ↔ Anthropic ↔ Ollama via one config line |
+| Complex pipelines need complex code | **Harness YAML** — the entire workflow is a readable, version-controllable YAML file |
+| Content lives in scripts, not published | **Publisher backends** — WordPress, Ghost, Blogger, or local file, configured, not coded |
+| No visibility when long jobs run unattended | **Notifier** — Telegram, Slack, or Discord alert on completion or failure |
+
+---
+
+## Key Features
+
+- **Declarative workflows** — entire pipeline logic lives in `harness.yaml`, not buried in code
+- **4 execution patterns** — `pipeline` (sequential), `fanout` (parallel branches), `supervisor` (strict QA), `generative` (creative)
+- **4 phase executors** — `llm` (LLM call), `shell` (subprocess), `python` (inline code), `passthrough` (forward context)
+- **Resumable by default** — checkpoint saved after every phase; `--resume` picks up exactly where it stopped
+- **Quality Gate** — LLM outputs a score; NOVA retries automatically if below your threshold
+- **RunBook** — declarative failure recovery: `rate limit → wait 60s → retry`, `timeout → notify`
+- **Evolution Log** — per-harness run history in Markdown + JSONL; track quality score trends
+- **Knowledge Base (KB)** — persistent markdown store across runs; inject prior context into prompts
+- **Zero infrastructure** — no databases, no message queues, no Docker required; pure Python + YAML
+- **Minimal dependencies** — core requires only `pyyaml`; LLM SDKs are optional extras
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  L0  Foundation — KB · Config · Provider abstractions        │
-├─────────────────────────────────────────────────────────────┤
-│  L1  Intake — CLI parses harness YAML + context variables    │
-├─────────────────────────────────────────────────────────────┤
-│  L2  Orchestrator — loads harness, restores checkpoint       │
-├─────────────────────────────────────────────────────────────┤
-│  L3  Execution — phases: llm | shell | python | passthrough  │
-├─────────────────────────────────────────────────────────────┤
-│  L4  Quality Gate — parse score → retry / pass / abort       │
-├─────────────────────────────────────────────────────────────┤
-│  L5  Evolution — log outcome, detect consecutive failures    │
-├─────────────────────────────────────────────────────────────┤
-│  L6  Observability — KB log + notifier alerts                │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  CLI  nova run <harness> [--resume] [--dry-run] --context k=v       │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │      Config Layer        │
+                    │  nova.yaml + NOVA_* env  │
+                    │  LLM · Notifier · Pub    │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │    Harness Loader        │
+                    │  Parses harness.yaml     │
+                    │  Validates phases/rules  │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │  Checkpoint · Resume     │
+                    │  Restores from last      │
+                    │  completed phase         │
+                    └────────────┬────────────┘
+                                 │
+          ┌──────────────────────▼──────────────────────┐
+          │               Orchestrator                   │
+          │                                              │
+          │   pattern=pipeline          pattern=fanout   │
+          │   ┌──────────────┐         ┌─────────────┐  │
+          │   │ Phase 1      │         │ Phase A     │  │
+          │   │ Phase 2      │         │ Phase B     │  │ (parallel)
+          │   │ Phase 3      │         │ Phase C     │  │
+          │   └──────┬───────┘         └──────┬──────┘  │
+          │          │                        │          │
+          │   ┌──────▼───────┐        ┌──────▼──────┐   │
+          │   │ Quality Gate │        │   Merge     │   │
+          │   │ score < 70?  │        │  Results    │   │
+          │   │ → retry      │        └─────────────┘   │
+          │   └──────────────┘                          │
+          └──────────────────────┬──────────────────────┘
+                                 │
+               ┌─────────────────┴──────────────────┐
+               │                                    │
+    ┌──────────▼───────┐              ┌─────────────▼──────┐
+    │  Evolution Log   │              │  KB · Notifier     │
+    │  run_YYYYMMDD    │              │  Markdown store     │
+    │  quality trend   │              │  Telegram/Slack     │
+    └──────────────────┘              └────────────────────┘
 ```
 
-**Single-agent design:** every phase runs in the same process.
-No secondary agents, no IPC, no Docker orchestration required.
+**Phase executors** at each step:
+
+| Executor | What it does |
+|---|---|
+| `llm` | Sends a prompt (from file or inline) to your LLM provider, saves output |
+| `shell` | Runs a shell command via `subprocess.run` |
+| `python` | Executes inline Python code; `context` dict and `workspace` Path are injected |
+| `passthrough` | Forwards context unchanged — useful for branching harness logic |
 
 ---
 
-## Quick Start
+## Quick Start (5 minutes)
 
-### 1. Install
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/noivan0/NOVA.git
 cd NOVA
 
-# Install with your preferred LLM provider:
-pip install -e ".[openai]"       # OpenAI GPT-4o / GPT-4.1 / o3 …
-pip install -e ".[anthropic]"    # Anthropic Claude
-pip install -e ".[ollama]"       # Local Ollama
-pip install -e ".[all]"          # All providers
+# Pick your LLM provider:
+pip install -e ".[openai]"      # OpenAI (GPT-4o, GPT-4.1, o3, o4-mini …)
+pip install -e ".[anthropic]"   # Anthropic Claude
+pip install -e ".[ollama]"      # Local Ollama — no API key needed
+pip install -e ".[all]"         # All providers at once
 ```
 
-### 2. Configure
+### 2. Set your API key
 
 ```bash
 cp .env.example .env
-# Edit .env — set NOVA_LLM_API_KEY and NOVA_LLM_MODEL at minimum
 ```
 
-### 3. Run a harness
+Open `.env` and set at minimum:
 
 ```bash
-# Research harness (fanout pattern — synthesises a topic from multiple angles)
+NOVA_LLM_PROVIDER=openai          # or anthropic / ollama / custom
+NOVA_LLM_MODEL=gpt-4o             # or claude-sonnet-4-6 / llama3.3 …
+NOVA_LLM_API_KEY=sk-...           # not needed for ollama
+```
+
+### 3. Run your first harness
+
+```bash
+# Research harness — gathers info from multiple angles, synthesises a report
 nova run research --context topic="the future of AI agents"
 
-# Blog pipeline (pipeline pattern — outline → draft → QA → revise → publish)
-nova run blog-pipeline --context title="Why AI agents will change work" keywords="AI,automation"
+# Blog pipeline — outline → draft → quality check → revise → publish
+nova run blog-pipeline \
+  --context title="Why AI agents will change work" \
+           keywords="AI,automation,future"
 
-# Resume an interrupted run (reads checkpoint from workspace/)
+# Resume if interrupted
 nova run blog-pipeline --resume
 
-# Dry run — validate harness structure without any LLM calls
+# Dry run — validate structure, preview prompts, no LLM calls
 nova run research --context topic="test" --dry-run
 ```
 
-### 4. Monitor
+### 4. Inspect results
 
 ```bash
-nova list                          # List available harnesses
-nova status blog-pipeline          # Show current checkpoint
-nova evolution blog-pipeline       # Show run history + failure rate
-nova kb search "AI agents"         # Full-text search your KB
-nova kb list                       # List all KB pages
+nova list                          # List all harnesses in harnesses/
+nova status blog-pipeline          # Current checkpoint state
+nova evolution blog-pipeline       # Run history: quality scores, durations, failures
+nova kb search "AI agents"         # Full-text search your persistent KB
+nova kb list                       # All KB pages
 ```
 
-### 5. Create a new harness
+### 5. Scaffold a new harness
 
 ```bash
 nova new my-workflow --pattern pipeline
-# Fills in harnesses/my-workflow/harness.yaml with a working skeleton
-# Edit the YAML and prompts/*, then run:
+# Creates harnesses/my-workflow/harness.yaml + prompts/ skeleton
+# Edit the YAML and prompts, then:
 nova run my-workflow --context key=value
 ```
 
 ---
 
-## Supported Providers
+## Detailed Usage
 
-### LLM
+### Running a harness
 
-| Provider | `llm.provider` | Recommended models | Install |
-|---|---|---|---|
-| **OpenAI** | `openai` | `gpt-4.1`, `gpt-4o`, `gpt-4o-mini`, `o3`, `o4-mini` | `pip install "openai>=2.0"` |
-| **Anthropic** | `anthropic` | `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-6` | `pip install "anthropic>=0.97"` |
-| **Ollama** (local) | `ollama` | `llama3.3`, `gemma3`, `qwen3`, `deepseek-r2`, `mistral` | `pip install "ollama>=0.6"` |
-| **Custom endpoint** | `custom` | Any OpenAI-compatible API (LM Studio, vLLM, LocalAI, …) | — |
-| **Echo** (testing) | `echo` | — Returns the prompt back, no API key needed | — |
+```bash
+nova run <harness-name> [options]
 
-> **Reasoning models (o1, o3, o4-mini):** NOVA automatically uses `max_completion_tokens`
-> instead of `max_tokens` and omits `temperature` — these are set per the OpenAI API spec.
+Options:
+  --resume          Resume from last checkpoint (skip already-completed phases)
+  --dry-run         Print prompts and phase plan without making any LLM calls
+  --config FILE     Config file path (default: nova.yaml)
+  --context k=v     Pass one or more context variables; repeat for multiple
+```
 
-### Notifier
+**Multiple context variables:**
 
-| Provider | `notifier.provider` | Notes |
-|---|---|---|
-| **None** | `none` | Default — silent |
-| **Telegram** | `telegram` | Bot API (`token` + `chat_id`) |
-| **Slack** | `slack` | Incoming Webhooks (`webhook_url`) |
-| **Discord** | `discord` | Webhooks (`webhook_url`) |
-| **Generic** | `webhook` | HTTP POST JSON to any endpoint |
+```bash
+nova run blog-pipeline \
+  --context title="My Post Title" \
+           keywords="AI,tech" \
+           audience="developers" \
+           language="English"
+```
 
-### Publisher
+**Override the LLM model for a single run:**
 
-| Provider | `publisher.provider` | Notes |
-|---|---|---|
-| **None** | `none` | Content stays in `workspace/` — default |
-| **File** | `file` | Write to local filesystem (Hugo, Jekyll, …) |
-| **WordPress** | `wordpress` | REST API v2 — Application Passwords (`user:app_password`) |
-| **Ghost** | `ghost` | Admin API v5 — Admin API key (`id:hex_secret`) |
-| **Blogger** | `blogger` | Google Blogger API v3 — OAuth2 access token |
+```bash
+NOVA_LLM_MODEL=gpt-4o-mini nova run research --context topic="quick test"
+```
+
+### Checking run history (Evolution)
+
+```bash
+nova evolution blog-pipeline
+```
+
+Output example:
+```
+Run History — blog-pipeline
+============================================================
+run_20260430_103000_abc1  SUCCESS  quality=88  duration=4m12s
+run_20260429_091500_def2  FAILED   phase=draft  error=timeout
+run_20260428_150200_ghi3  SUCCESS  quality=76  duration=5m01s
+
+Average quality score: 82
+Success rate: 67% (2/3)
+Consecutive failures: 0
+```
+
+### Searching the Knowledge Base
+
+```bash
+nova kb search "blog writing tips"       # Full-text search
+nova kb list                             # List all KB pages
+nova kb write tips docs/writing-tips.md # Import a file into the KB
+```
 
 ---
 
-## Harness YAML Reference
+## Writing a Harness
+
+### Minimal harness
+
+```yaml
+# harnesses/my-summary/harness.yaml
+name: my-summary
+description: "Summarise a topic in 3 bullet points"
+version: "1.0.0"
+pattern: pipeline
+
+phases:
+  - id: summarise
+    name: "Summarise"
+    executor: llm
+    prompt: |
+      Summarise "{{topic}}" in exactly 3 bullet points.
+      Be concise and practical.
+    output_file: summary.md
+    on_failure: retry
+```
+
+Run it:
+```bash
+nova run my-summary --context topic="machine learning basics"
+cat workspace/summary.md
+```
+
+### Full harness reference
 
 ```yaml
 name: my-harness
 description: "What this workflow does"
 version: "1.0.0"
+
+# Execution pattern (see Patterns section below)
 pattern: pipeline          # pipeline | fanout | supervisor | generative
 
-# System prompt injected into every LLM call in this harness (optional)
+# Optional: system prompt injected into every LLM call in this harness
 persona: |
-  A senior technical writer producing clear, actionable documentation.
+  A senior technical writer producing clear, actionable documentation
+  for developers. Use concrete examples. Avoid jargon.
 
 phases:
   - id: research
     name: "Research Phase"
-    executor: llm            # llm | shell | python | passthrough
-    prompt_file: research.txt
-    output_file: research.md
-    timeout: 180             # seconds (overrides global phase_timeout)
-    retries: 2               # overrides global max_retries
-    quality_check: true      # parse SCORE: N/100 from output; retry if < threshold
-    on_failure: retry        # retry | skip | abort
+    description: "Gather background information"
+    executor: llm                  # llm | shell | python | passthrough
 
-  - id: write
-    name: "Writing Phase"
-    executor: llm
+    # LLM executor: use prompt_file OR inline prompt
+    prompt_file: prompts/research.txt     # file in harness directory
+    # prompt: "Inline prompt text with {{topic}} template variables"
+
+    # Files from workspace/ to inject into prompt context
     input_files:
-      - research.md          # injected into prompt from workspace/
-    prompt_file: write.txt
-    output_file: draft.md
+      - outline.md                 # injected as [outline.md]\n<content>\n
+
+    output_file: research.md       # saved to workspace/
+
+    timeout: 180                   # seconds (overrides global phase_timeout)
+    retries: 3                     # overrides global max_retries
+    quality_check: true            # parse SCORE from output; retry if below threshold
+    on_failure: retry              # retry | skip | abort | runbook
+
+  - id: shell_step
+    name: "Run a script"
+    executor: shell
+    command: "python scripts/process.py --input workspace/research.md"
+    output_file: processed.txt
+    on_failure: skip
+
+  - id: python_step
+    name: "Custom Python"
+    executor: python
+    command: |
+      # Variables injected: context (dict), workspace (Path), _publisher, _notifier
+      data = (workspace / "research.md").read_text()
+      summary = data[:500]           # first 500 chars
+      output = f"Summary:\n{summary}"
+    output_file: summary.txt
     on_failure: abort
 
   - id: publish
     name: "Publish"
     executor: python
     command: |
-      # _publisher is injected by the orchestrator — no nova imports needed
       publisher = context["_publisher"]
-      content = (workspace / "draft.md").read_text()
-      url = publisher.publish(title=context["title"], content=content)
-      output = url or "not published"
+      content = (workspace / "final.md").read_text()
+      url = publisher.publish(
+          title=context["title"],
+          content=content,
+          tags=["ai", "automation"],
+      )
+      output = url or "saved locally"
     output_file: result.txt
     on_failure: skip
 
+# Automatic failure recovery rules
 runbook:
-  - symptom: "rate limit"
-    action: "wait:60"
+  - symptom: "rate limit"          # matched against error message (case-insensitive)
+    action: "wait:60"              # built-in: wait N seconds then retry
   - symptom: "timeout"
-    action: "notify"
+    action: "notify"               # built-in: send notifier alert
+  - symptom: "connection error"
+    action: "wait:30"
 
+# Run history logging (recommended: always enable)
 evolution:
   enabled: true
-  file: evolution.md
+  file: evolution.md               # written to harness directory
 ```
 
-### Patterns
+### Prompt files
 
-| Pattern | Behaviour |
-|---|---|
-| `pipeline` | Phases run sequentially; each phase's output flows into the next |
-| `fanout` | All phases run independently; results merged into `_fanout_results` |
-| `supervisor` | Like pipeline, but with stricter quality enforcement |
-| `generative` | Like pipeline, optimised for creative / generative workflows |
+Prompt files live in `harnesses/<name>/prompts/`. Use `{{variable}}` for template substitution:
 
-### Context variables
+```
+# harnesses/blog-pipeline/prompts/draft.txt
 
-Pass `--context key=value` on the CLI. Inside prompts use `{{key}}`. Inside Python phases use `context["key"]`.
+Write a compelling blog post based on the outline below.
 
-Special built-ins injected by the orchestrator:
+Topic: {{title}}
+Target keywords: {{keywords}}
+Tone: Professional but accessible
 
-| Key | Value |
-|---|---|
-| `_publisher` | Configured `Publisher` instance |
-| `_phase_<id>` | Output of a completed phase |
-| `_fanout_results` | Dict of all fanout phase outputs |
-| `_last_quality_score` | Most recent parsed quality score |
+--- OUTLINE ---
+{{outline.md}}
 
-### Quality gate
+--- INSTRUCTIONS ---
+- Length: 800-1200 words
+- Start with a strong hook
+- Use concrete examples
+- End with a clear call to action
 
-Add `quality_check: true` to a phase. The LLM output is scanned for a score in any of these formats:
+Write the complete post now:
+```
+
+Variables available in every prompt:
+- `{{key}}` — any `--context key=value` passed at the CLI
+- `{{filename.md}}` — content of an `input_files` entry
+- `{{_phase_<id>}}` — output of a previously completed phase
+
+---
+
+## Execution Patterns
+
+### `pipeline` — Sequential
+
+Each phase runs in order. The output of phase N is available to phase N+1 via `input_files` or `{{_phase_N}}`.
+
+```
+Phase 1 → Phase 2 → Phase 3 → Phase 4
+```
+
+Best for: blog writing, report generation, document processing, code generation pipelines.
+
+### `fanout` — Parallel branches
+
+All phases run independently (sequentially in current implementation, merged at the end).
+Results are collected into `_fanout_results` for a synthesis phase.
+
+```
+Phase A ─┐
+Phase B ─┼─→ (merge) → Synthesis
+Phase C ─┘
+```
+
+Best for: multi-angle research, A/B content generation, parallel data gathering.
+
+### `supervisor` — Quality-enforced pipeline
+
+Like `pipeline`, but with stricter quality enforcement: the workflow halts on the first phase
+that cannot reach the quality threshold after all retries.
+
+Best for: high-stakes content, automated publishing where quality must be guaranteed.
+
+### `generative` — Creative pipeline
+
+Like `pipeline`, optimised for creative and generative workflows with higher temperature defaults
+and more tolerant failure handling.
+
+Best for: creative writing, ideation, brainstorming workflows.
+
+---
+
+## Quality Gate
+
+Add `quality_check: true` to any phase to activate automatic quality scoring.
+
+The LLM response is scanned for a numeric score in any of these formats:
 
 ```
 SCORE: 85
@@ -231,63 +447,267 @@ Quality: 72/100
 quality_score: 90
 [SCORE=88]
 85 out of 100
+Score — 78
 ```
 
-If the score is below `quality_threshold` (default 70), the phase retries. If no score is found the gate is skipped (not failed).
+**What happens:**
+- Score ≥ `quality_threshold` (default: 70) → phase passes, execution continues
+- Score < threshold → phase retries (up to `max_retries` times)
+- No score found → gate is skipped (not failed) — the phase passes
+- All retries exhausted → `on_failure` rule applies
+
+**Example quality check prompt** (`prompts/quality_check.txt`):
+
+```
+Review the following blog post draft and score it.
+
+--- POST ---
+{{draft.md}}
+
+Evaluate on:
+- Clarity and structure (0-30)
+- Depth and accuracy (0-30)
+- Engagement and tone (0-20)
+- SEO and keywords (0-20)
+
+Provide specific improvement notes, then on the final line write:
+SCORE: <total>/100
+```
+
+---
+
+## Knowledge Base (KB)
+
+NOVA includes a lightweight, file-based knowledge base that persists across runs.
+
+```
+kb/
+├── index.md          ← auto-updated table of contents
+├── log.md            ← append-only activity log
+├── config/           ← system configuration notes
+├── fixes/            ← workarounds and lessons learned
+├── projects/         ← per-harness notes
+└── user/             ← user preferences and context
+```
+
+**CLI:**
+```bash
+nova kb write config/llm-notes notes.md       # import file into KB
+nova kb search "rate limit workaround"         # full-text search
+nova kb list                                   # list all pages
+```
+
+**In a Python phase:**
+```python
+# context["_kb"] is injected automatically
+kb = context["_kb"]
+notes = kb.read("config/llm-notes")
+kb.write("projects/my-harness", "# Run notes\n\nSomething useful.")
+kb.append_log("my-harness | phase 3 complete — quality 88")
+```
+
+**In a prompt:**
+```
+Use the following prior research when writing this post:
+{{kb:projects/my-topic-research}}
+```
+
+---
+
+## Evolution Log
+
+Every harness run is automatically appended to `harnesses/<name>/evolution.md` (Markdown)
+and `harnesses/<name>/evolution.jsonl` (JSON Lines for programmatic analysis).
+
+Example `evolution.md` entry:
+```markdown
+## run_20260430_103000_abc12345
+
+- **Status:** SUCCESS
+- **Pattern:** pipeline
+- **Duration:** 4m 12s
+- **Quality score:** 88/100
+- **Phases:** outline ✓ · draft ✓ · quality_check ✓ · revise ✓ · publish ✓
+- **Published:** https://myblog.com/why-ai-will-change-work
+
+### Notes
+Quality improved from 76 → 88 after adding persona to prompt.
+```
+
+Use `nova evolution <harness>` to view aggregated statistics across all runs.
+
+---
+
+## Supported Providers
+
+### LLM Providers
+
+| Provider | `llm.provider` | Recommended models | Install |
+|---|---|---|---|
+| **OpenAI** | `openai` | `gpt-4.1`, `gpt-4o`, `gpt-4o-mini`, `o3`, `o4-mini` | `pip install "nova-orchestrator[openai]"` |
+| **Anthropic** | `anthropic` | `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-6` | `pip install "nova-orchestrator[anthropic]"` |
+| **Ollama** (local) | `ollama` | `llama3.3`, `gemma3`, `qwen3`, `mistral`, `deepseek-r1` | `pip install "nova-orchestrator[ollama]"` |
+| **Custom endpoint** | `custom` | Any OpenAI-compatible API (LM Studio, vLLM, LocalAI, Azure OpenAI …) | — |
+| **Echo** (testing) | `echo` | — Returns prompt back; no API key needed | — |
+
+> **Reasoning models (o1, o3, o4-mini):** NOVA automatically switches to `max_completion_tokens`
+> and omits `temperature` — fully compliant with the OpenAI reasoning model API spec.
+
+> **Local inference with Ollama:** Install [Ollama](https://ollama.com), pull a model
+> (`ollama pull llama3.3`), then set `NOVA_LLM_PROVIDER=ollama` — no API key, no cost.
+
+### Notifier Providers
+
+| Provider | `notifier.provider` | What you need |
+|---|---|---|
+| **None** | `none` | Default — silent operation |
+| **Telegram** | `telegram` | Bot token + chat ID |
+| **Slack** | `slack` | Incoming Webhook URL |
+| **Discord** | `discord` | Webhook URL |
+| **Generic Webhook** | `webhook` | Any HTTP POST endpoint |
+
+### Publisher Providers
+
+| Provider | `publisher.provider` | What you need |
+|---|---|---|
+| **None** | `none` | Content stays in `workspace/` |
+| **File** | `file` | Local output directory (great for Hugo, Jekyll, Docusaurus) |
+| **WordPress** | `wordpress` | Site URL + Application Password (`user:app_password`) |
+| **Ghost** | `ghost` | Site URL + Admin API key (`id:hex_secret`) |
+| **Blogger** | `blogger` | Google OAuth2 access token + Blog ID |
 
 ---
 
 ## Configuration
 
-NOVA merges config from three layers (later layers override earlier ones):
+NOVA merges configuration from three layers (later layers override earlier):
 
-1. Built-in defaults (see `nova/core/config.py`)
-2. `nova.yaml` in the current directory
-3. Environment variables (`NOVA_*`)
+1. **Built-in defaults** (see `nova/core/config.py`)
+2. **`nova.yaml`** in the working directory
+3. **Environment variables** (`NOVA_*`)
 
-### `nova.yaml` example
+### `nova.yaml` — full reference
 
 ```yaml
-workspace: ./workspace
-harnesses_dir: ./harnesses
+# Paths
+workspace: ./workspace          # Where harness run artifacts are stored
+harnesses_dir: ./harnesses      # Where harness directories live
 
+# LLM
 llm:
-  provider: openai
+  provider: openai              # openai | anthropic | ollama | custom | echo
   model: gpt-4o
+  api_key: ""                   # Or NOVA_LLM_API_KEY env var
+  base_url: ""                  # For custom/enterprise endpoints
   max_tokens: 4096
   temperature: 0.7
+  timeout: 120                  # Seconds per LLM call
 
+# Notifier (optional)
 notifier:
-  provider: telegram
-  token: ${NOVA_NOTIFIER_TOKEN}
-  chat_id: ${NOVA_NOTIFIER_CHAT_ID}
+  provider: none                # none | telegram | slack | discord | webhook
+  token: ""                     # Telegram bot token
+  chat_id: ""                   # Telegram chat ID
+  webhook_url: ""               # Slack / Discord / generic webhook
 
+# Publisher (optional)
 publisher:
-  provider: ghost
-  base_url: https://myblog.ghost.io
-  api_key: ${NOVA_PUBLISHER_API_KEY}
+  provider: file                # none | file | wordpress | ghost | blogger
+  output_dir: ./output          # For file publisher
+  api_key: ""                   # WordPress: "user:app_password", Ghost: "id:secret"
+  base_url: ""                  # WordPress / Ghost site URL
+  blog_id: ""                   # Blogger blog ID
 
-phase_timeout: 300
-max_retries: 2
-quality_threshold: 70
+# KB
+kb:
+  path: ./kb
+
+# Execution defaults (can be overridden per phase)
+phase_timeout: 300              # Seconds per phase
+max_retries: 2                  # Phase retry attempts
+quality_threshold: 70           # Minimum score (0-100) to pass quality gate
 ```
 
-### Key environment variables
+### Environment variables
 
-| Variable | Description |
-|---|---|
-| `NOVA_LLM_PROVIDER` | `openai` / `anthropic` / `ollama` / `custom` / `echo` |
-| `NOVA_LLM_MODEL` | Model name (e.g. `gpt-4o`, `claude-sonnet-4-6`, `llama3.3`) |
-| `NOVA_LLM_API_KEY` | API key for your LLM provider |
-| `NOVA_LLM_BASE_URL` | Custom base URL for OpenAI-compatible endpoints |
-| `NOVA_NOTIFIER_PROVIDER` | `none` / `telegram` / `slack` / `discord` / `webhook` |
-| `NOVA_NOTIFIER_TOKEN` | Telegram bot token |
-| `NOVA_NOTIFIER_CHAT_ID` | Telegram chat ID |
-| `NOVA_NOTIFIER_WEBHOOK_URL` | Slack / Discord / generic webhook URL |
-| `NOVA_PUBLISHER_PROVIDER` | `none` / `file` / `wordpress` / `ghost` / `blogger` |
-| `NOVA_PUBLISHER_API_KEY` | Publisher API key / credentials |
-| `NOVA_PUBLISHER_BASE_URL` | Publisher site URL |
-| `NOVA_DRY_RUN` | `true` — skip all LLM calls, print prompts only |
+| Variable | Description | Default |
+|---|---|---|
+| `NOVA_LLM_PROVIDER` | LLM provider | `openai` |
+| `NOVA_LLM_MODEL` | Model name | `gpt-4o` |
+| `NOVA_LLM_API_KEY` | API key | — |
+| `NOVA_LLM_BASE_URL` | Custom base URL | — |
+| `NOVA_LLM_MAX_TOKENS` | Max tokens per call | `4096` |
+| `NOVA_LLM_TEMPERATURE` | Temperature | `0.7` |
+| `NOVA_LLM_TIMEOUT` | Timeout seconds | `120` |
+| `NOVA_NOTIFIER_PROVIDER` | Notifier type | `none` |
+| `NOVA_NOTIFIER_TOKEN` | Telegram bot token | — |
+| `NOVA_NOTIFIER_CHAT_ID` | Telegram chat ID | — |
+| `NOVA_NOTIFIER_WEBHOOK_URL` | Slack/Discord webhook | — |
+| `NOVA_PUBLISHER_PROVIDER` | Publisher type | `file` |
+| `NOVA_PUBLISHER_API_KEY` | Publisher credentials | — |
+| `NOVA_PUBLISHER_BASE_URL` | Publisher site URL | — |
+| `NOVA_PUBLISHER_BLOG_ID` | Blogger blog ID | — |
+| `NOVA_WORKSPACE` | Workspace directory | `./workspace` |
+| `NOVA_KB_PATH` | KB directory | `./kb` |
+| `NOVA_HARNESSES_DIR` | Harnesses directory | `./harnesses` |
+| `NOVA_QUALITY_THRESHOLD` | Default quality threshold | `70` |
+| `NOVA_MAX_RETRIES` | Default retry count | `2` |
+| `NOVA_PHASE_TIMEOUT` | Default phase timeout | `300` |
+| `NOVA_DRY_RUN` | `true` to skip LLM calls | `false` |
+
+---
+
+## Use Cases
+
+### 1. Automated blog publishing
+
+Run a full blog post pipeline — research, write, QA, publish — unattended:
+
+```bash
+# Publish to WordPress
+NOVA_PUBLISHER_PROVIDER=wordpress \
+NOVA_PUBLISHER_BASE_URL=https://myblog.com \
+NOVA_PUBLISHER_API_KEY="admin:my_app_password" \
+nova run blog-pipeline --context title="AI in 2026" keywords="AI,LLM,agents"
+```
+
+### 2. Research reports
+
+Synthesise a comprehensive report from multiple angles:
+
+```bash
+nova run research --context topic="competitive analysis of AI coding assistants"
+cat workspace/report.md
+```
+
+### 3. Local inference (no API cost)
+
+Run entirely locally with Ollama — no API key, no cost:
+
+```bash
+ollama pull llama3.3
+NOVA_LLM_PROVIDER=ollama \
+NOVA_LLM_MODEL=llama3.3 \
+nova run research --context topic="Python best practices"
+```
+
+### 4. Scheduled content (cron)
+
+```bash
+# In crontab — run every Monday at 09:00
+0 9 * * 1 cd /path/to/NOVA && nova run blog-pipeline \
+  --context title="Weekly AI digest" keywords="AI,weekly"
+```
+
+### 5. Custom workflow
+
+Create a harness for any multi-step AI task:
+
+```bash
+nova new code-review --pattern pipeline
+# Edit harnesses/code-review/harness.yaml
+nova run code-review --context pr_diff="$(git diff main)"
+```
 
 ---
 
@@ -297,61 +717,173 @@ quality_threshold: 70
 NOVA/
 ├── nova/
 │   ├── core/
-│   │   ├── config.py        # Configuration loading (YAML + env vars)
-│   │   ├── harness.py       # Harness YAML parser and dataclasses
-│   │   ├── orchestrator.py  # Execution engine — pipeline / fanout
-│   │   ├── checkpoint.py    # Resumable state persistence
-│   │   ├── evolution.py     # Run history (Markdown + JSONL)
-│   │   └── kb.py            # Markdown knowledge base
+│   │   ├── config.py        # Configuration loading — YAML + env vars, 3-layer merge
+│   │   ├── harness.py       # Harness YAML parser and dataclass definitions
+│   │   ├── orchestrator.py  # Execution engine — pipeline / fanout patterns
+│   │   ├── checkpoint.py    # Resumable state — JSON file per harness
+│   │   ├── evolution.py     # Run history — Markdown + JSONL logging
+│   │   └── kb.py            # Markdown knowledge base — read/write/search
 │   ├── providers/
 │   │   ├── llm.py           # OpenAI · Anthropic · Ollama · Custom · Echo
-│   │   ├── notifier.py      # Telegram · Slack · Discord · Webhook
-│   │   └── publisher.py     # WordPress · Ghost · Blogger · File
+│   │   ├── notifier.py      # Telegram · Slack · Discord · Webhook · None
+│   │   └── publisher.py     # WordPress · Ghost · Blogger · File · None
 │   └── cli/
-│       └── main.py          # `nova` CLI entrypoint
+│       └── main.py          # `nova` CLI — run / list / status / evolution / kb / new
 ├── harnesses/
-│   ├── blog-pipeline/       # Example: end-to-end blog post creation
-│   └── research/            # Example: multi-angle research synthesis
+│   ├── blog-pipeline/       # End-to-end blog post creation (pipeline pattern)
+│   │   ├── harness.yaml
+│   │   └── prompts/         # outline.txt · draft.txt · quality_check.txt · revise.txt
+│   └── research/            # Multi-angle research synthesis (fanout pattern)
+│       ├── harness.yaml
+│       └── prompts/         # web_search.txt · synthesis.txt
+├── examples/
+│   ├── quickstart.py        # Minimal programmatic usage example
+│   ├── custom_provider.py   # How to implement a custom LLM provider
+│   └── custom_publisher.py  # How to implement a custom publisher
 ├── tests/
-│   ├── unit/                # Checkpoint, evolution, harness loader, KB
-│   └── integration/         # Orchestrator with echo provider (no API key)
+│   ├── unit/                # Checkpoint · Evolution · Harness loader · KB (no API key)
+│   └── integration/         # Orchestrator with echo provider (no API key needed)
 ├── docs/
-│   └── architecture.md      # Deep-dive architecture documentation
+│   ├── architecture.md      # Deep-dive architecture documentation
+│   └── guides/
+│       ├── quickstart.md        # Step-by-step first run guide
+│       ├── writing-harnesses.md # Complete harness authoring guide
+│       ├── providers.md         # Provider setup (OpenAI, Anthropic, Ollama, …)
+│       └── custom-provider.md   # How to add a custom LLM / publisher / notifier
+├── docker-compose.yml       # Docker Compose for containerised runs
 ├── nova.yaml                # Default configuration (edit this)
 ├── .env.example             # Environment variable template
-└── pyproject.toml           # Package metadata + optional deps
+└── pyproject.toml           # Package metadata + optional dependencies
 ```
 
 ---
 
 ## Running Tests
 
+All 14 tests pass with no API key required (uses the built-in `echo` provider):
+
 ```bash
 pip install -e ".[dev]"
 pytest tests/ -v
-# All 14 tests pass with no API key needed (uses echo provider)
+```
+
+```
+tests/unit/test_checkpoint.py        PASSED  (4 tests)
+tests/unit/test_evolution.py         PASSED  (3 tests)
+tests/unit/test_harness_loader.py    PASSED  (4 tests)
+tests/unit/test_kb.py                PASSED  (2 tests)
+tests/integration/test_orchestrator_echo.py  PASSED  (1 test)
 ```
 
 ---
 
 ## Docker
 
+Run NOVA in a container without installing Python dependencies locally:
+
 ```bash
-docker compose run nova nova run research --context topic="AI agents"
+# Research harness
+docker compose run nova nova run research --context topic="AI agents 2026"
+
+# Blog pipeline
+docker compose run nova nova run blog-pipeline \
+  --context title="My Post" keywords="AI,tech"
 ```
+
+The `docker-compose.yml` mounts the current directory and passes through `NOVA_*` environment variables.
+
+---
+
+## Adding a Custom Provider
+
+### Custom LLM provider
+
+```python
+# examples/custom_provider.py
+from nova.providers.llm import LLMProvider
+from nova.core.config import LLMConfig
+
+class MyCustomLLM(LLMProvider):
+    def __init__(self, cfg: LLMConfig):
+        self.endpoint = cfg.base_url
+        self.api_key = cfg.api_key
+
+    def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
+        # Call your LLM API here
+        import urllib.request, json
+        payload = json.dumps({"prompt": prompt, "system": system}).encode()
+        req = urllib.request.Request(
+            self.endpoint,
+            data=payload,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())["text"]
+```
+
+### Custom publisher
+
+```python
+# examples/custom_publisher.py
+from nova.providers.publisher import Publisher
+from nova.core.config import PublisherConfig
+from typing import List, Optional
+
+class MyPublisher(Publisher):
+    def __init__(self, cfg: PublisherConfig):
+        self.api_key = cfg.api_key
+
+    def publish(
+        self,
+        title: str,
+        content: str,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[dict] = None,
+    ) -> Optional[str]:
+        # Publish to your platform and return the URL
+        print(f"Publishing: {title}")
+        return "https://example.com/my-post"
+```
+
+Register your provider in `nova/providers/llm.py` or `nova/providers/publisher.py`
+by adding it to the `get_llm_provider()` / `get_publisher()` factory functions.
+
+---
+
+## Roadmap
+
+- [ ] Parallel phase execution (true async fanout)
+- [ ] Web UI — harness status dashboard
+- [ ] PyPI package (`pip install nova-orchestrator`)
+- [ ] HuggingFace Inference API provider
+- [ ] Medium / Substack publisher
+- [ ] Harness marketplace (share and import community harnesses)
+- [ ] Streaming LLM output support
+- [ ] NOVA MCP server (use as a Model Context Protocol tool)
 
 ---
 
 ## Contributing
 
-1. Fork the repo
+Contributions are welcome — bug fixes, new providers, new harness examples, documentation.
+
+1. Fork the repository
 2. `pip install -e ".[dev]"`
-3. Add a test for your change
-4. `pytest tests/ -v && ruff check nova/ && black --check nova/`
-5. Open a PR
+3. Create a branch: `git checkout -b feat/my-feature`
+4. Add tests for your change
+5. Run the test suite: `pytest tests/ -v`
+6. Open a pull request
+
+Please keep PRs focused. One feature or fix per PR.
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+---
+
+<p align="center">
+  Built with ❤️ — <a href="https://github.com/noivan0/NOVA">github.com/noivan0/NOVA</a>
+</p>
