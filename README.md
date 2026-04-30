@@ -148,7 +148,7 @@ Open `.env` and set at minimum:
 
 ```bash
 NOVA_LLM_PROVIDER=openai          # or anthropic / ollama / custom
-NOVA_LLM_MODEL=gpt-4o             # or claude-sonnet-4-6 / llama3.3 …
+NOVA_LLM_MODEL=gpt-5.5             # or claude-sonnet-4-5-20250514 / llama3.3 …
 NOVA_LLM_API_KEY=sk-...           # not needed for ollama
 ```
 
@@ -544,8 +544,8 @@ Use `nova evolution <harness>` to view aggregated statistics across all runs.
 
 | Provider | `llm.provider` | Recommended models | Install |
 |---|---|---|---|
-| **OpenAI** | `openai` | `gpt-4.1`, `gpt-4o`, `gpt-4o-mini`, `o3`, `o4-mini` | `pip install "nova-orchestrator[openai]"` |
-| **Anthropic** | `anthropic` | `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-6` | `pip install "nova-orchestrator[anthropic]"` |
+| **OpenAI** | `openai` | `gpt-5.5`, `gpt-5`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o3`, `o4-mini` | `pip install "nova-orchestrator[openai]"` |
+| **Anthropic** | `anthropic` | `claude-opus-4-5-20250514`, `claude-sonnet-4-5-20250514`, `claude-haiku-3-5-20241022` | `pip install "nova-orchestrator[anthropic]"` |
 | **Ollama** (local) | `ollama` | `llama3.3`, `gemma3`, `qwen3`, `mistral`, `deepseek-r1` | `pip install "nova-orchestrator[ollama]"` |
 | **Custom endpoint** | `custom` | Any OpenAI-compatible API (LM Studio, vLLM, LocalAI, Azure OpenAI …) | — |
 | **Echo** (testing) | `echo` | — Returns prompt back; no API key needed | — |
