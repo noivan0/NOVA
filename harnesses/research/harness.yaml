@@ -1,0 +1,55 @@
+name: research
+description: "Multi-angle research harness — gathers information from multiple angles and synthesizes a final report."
+version: "1.0.0"
+pattern: fanout
+
+persona: |
+  A knowledge worker who needs comprehensive, well-sourced research reports
+  on any topic — from market analysis to technical deep-dives.
+
+phases:
+  - id: web_search
+    name: "Web Research"
+    description: "Search the web and summarize key findings on the topic"
+    executor: llm
+    prompt_file: web_search.txt
+    output_file: web_research.md
+    on_failure: skip
+
+  - id: kb_context
+    name: "KB Context Retrieval"
+    description: "Extract relevant prior knowledge from the local KB"
+    executor: python
+    command: |
+      from pathlib import Path
+      kb_path = workspace / ".." / ".." / ".." / "kb"
+      results = []
+      if kb_path.exists():
+          for md in list(kb_path.rglob("*.md"))[:20]:
+              text = md.read_text()
+              if context.get("topic", "").lower() in text.lower():
+                  results.append(f"=== {md.name} ===\n{text[:500]}")
+      output = "\n\n".join(results) if results else "No prior KB context found."
+    output_file: kb_context.md
+    on_failure: skip
+
+  - id: synthesis
+    name: "Synthesis"
+    description: "Combine all research into a structured final report"
+    executor: llm
+    input_files:
+      - web_research.md
+      - kb_context.md
+    prompt_file: synthesis.txt
+    output_file: report.md
+    quality_check: true
+    on_failure: abort
+
+runbook:
+  - symptom: "timeout"
+    action: "notify"
+    escalate_after: 300
+
+evolution:
+  enabled: true
+  file: evolution.md

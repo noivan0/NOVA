@@ -1,0 +1,44 @@
+# nova.yaml — NOVA configuration file
+# Copy this file to your project root and customize.
+# All values can be overridden with NOVA_* environment variables.
+
+# ── Paths ──────────────────────────────────────────────────────────────────
+workspace: ./workspace          # Where harness run artifacts are stored
+harnesses_dir: ./harnesses      # Where harness directories live
+
+# ── LLM Provider ───────────────────────────────────────────────────────────
+llm:
+  provider: openai              # openai | anthropic | ollama | custom | echo
+  model: gpt-4o                 # Model name
+  api_key: ""                   # Or set NOVA_LLM_API_KEY env var
+  # base_url: ""                # For custom/enterprise endpoints
+  max_tokens: 4096
+  temperature: 0.7
+  timeout: 120                  # Seconds per LLM call
+
+# ── Notifier ───────────────────────────────────────────────────────────────
+notifier:
+  provider: none                # none | telegram | slack | discord | webhook
+  token: ""                     # Bot token (Telegram) or app token (Slack)
+  chat_id: ""                   # Telegram chat ID or Slack channel ID
+  webhook_url: ""               # For slack / discord / webhook providers
+
+# ── Publisher ──────────────────────────────────────────────────────────────
+publisher:
+  provider: file                # none | file | wordpress | ghost | blogger
+  output_dir: ./output          # For file publisher: where to write posts
+  # api_key: ""                 # For WordPress: "user:app_password", Ghost: "id:secret"
+  # blog_id: ""                 # For Blogger
+  # base_url: ""                # For WordPress / Ghost site URL
+
+# ── Knowledge Base ─────────────────────────────────────────────────────────
+kb:
+  path: ./kb                    # KB root directory
+  auto_record: true             # Auto-log harness runs to kb/log.md
+
+# ── Execution ──────────────────────────────────────────────────────────────
+phase_timeout: 300              # Max seconds per phase (default)
+max_retries: 2                  # Max retries per phase on failure
+quality_threshold: 70           # Min quality score (0-100) to pass quality gate
+evolution_enabled: true         # Record run history in evolution.md
+dry_run: false                  # If true, skip LLM calls (for testing)

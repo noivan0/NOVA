@@ -1,0 +1,28 @@
+services:
+  nova:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - nova_kb:/app/kb
+      - nova_workspace:/app/workspace
+    env_file:
+      - .env
+    command: ["python", "-m", "nova.cli.main", "run", "${NOVA_HARNESS:-research}", "--context", "topic=${NOVA_TOPIC:-AI orchestration}"]
+
+  # Run any harness via: docker compose run nova-cli run <harness-name>
+  nova-cli:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - nova_kb:/app/kb
+      - nova_workspace:/app/workspace
+    env_file:
+      - .env
+    entrypoint: ["python", "-m", "nova.cli.main"]
+    profiles: ["cli"]
+
+volumes:
+  nova_kb:
+  nova_workspace:

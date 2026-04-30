@@ -1,0 +1,31 @@
+You are an expert blog editor. Your job is to score the draft and identify improvements.
+
+Draft to review:
+{{draft.md}}
+
+Score the draft on each dimension (0-100):
+1. Clarity — Is it easy to understand?
+2. Depth — Does it go beyond surface-level observations?
+3. Engagement — Will readers stay to the end?
+4. Structure — Does it flow logically?
+5. SEO — Are keywords used naturally?
+
+Calculate: overall_score = average of all 5 dimensions
+
+Then provide:
+- Top 3 specific improvements needed (with examples from the text)
+- Sentences to rewrite (quote the original, provide replacement)
+- Sections to expand or cut
+
+Format your response as:
+
+SCORES:
+- Clarity: X/100
+- Depth: X/100
+- Engagement: X/100
+- Structure: X/100
+- SEO: X/100
+- Overall: X/100
+
+IMPROVEMENTS:
+[Your detailed feedback]

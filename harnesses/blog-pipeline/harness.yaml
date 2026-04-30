@@ -1,0 +1,87 @@
+name: blog-pipeline
+description: "End-to-end blog post creation pipeline — from topic to published post."
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  A content creator publishing long-form blog posts (1000-1500 words) aimed at
+  curious, intelligent readers who want depth without jargon.
+  They value clear structure, practical insights, and engaging prose.
+
+phases:
+  - id: outline
+    name: "Create Outline"
+    description: "Generate a detailed post outline from the topic and keywords"
+    executor: llm
+    prompt_file: outline.txt
+    output_file: outline.md
+    on_failure: retry
+
+  - id: draft
+    name: "Write Draft"
+    description: "Write the full blog post from the outline"
+    executor: llm
+    input_files:
+      - outline.md
+    prompt_file: draft.txt
+    output_file: draft.md
+    timeout: 180
+    on_failure: retry
+
+  - id: quality_check
+    name: "Quality Check"
+    description: "Score the draft and provide improvement notes"
+    executor: llm
+    input_files:
+      - draft.md
+    prompt_file: quality_check.txt
+    output_file: quality_report.md
+    quality_check: true
+    on_failure: retry
+
+  - id: revise
+    name: "Revise"
+    description: "Apply quality feedback to produce the final post"
+    executor: llm
+    input_files:
+      - draft.md
+      - quality_report.md
+    prompt_file: revise.txt
+    output_file: final_post.md
+    on_failure: abort
+
+  - id: publish
+    name: "Publish"
+    description: "Write final post to the configured publisher"
+    executor: python
+    command: |
+      from nova.core.config import load_config
+      from nova.providers.publisher import get_publisher
+      from pathlib import Path
+
+      cfg = load_config()
+      publisher = get_publisher(cfg.publisher)
+
+      final = (workspace / "final_post.md").read_text()
+      title = context.get("title", "Untitled Post")
+      tags = context.get("tags", "").split(",") if context.get("tags") else []
+
+      url = publisher.publish(title=title, content=final, tags=tags)
+      output = f"Published: {url}" if url else "Not published (no publisher configured)"
+    output_file: publish_result.txt
+    on_failure: skip
+
+runbook:
+  - symptom: "rate limit"
+    action: "wait:60"
+    escalate_after: 7200
+  - symptom: "timeout"
+    action: "notify"
+    escalate_after: 600
+  - symptom: "quality"
+    action: "notify"
+    escalate_after: 1800
+
+evolution:
+  enabled: true
+  file: evolution.md
