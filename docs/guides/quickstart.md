@@ -54,14 +54,14 @@ Open `.env` and set your provider. Minimal configuration:
 ```bash
 NOVA_LLM_PROVIDER=openai
 NOVA_LLM_MODEL=gpt-4o
-NOVA_LLM_API_KEY=sk-...
+NOVA_LLM_API_KEY=***
 ```
 
 **Anthropic Claude:**
 ```bash
 NOVA_LLM_PROVIDER=anthropic
 NOVA_LLM_MODEL=claude-sonnet-4-6
-NOVA_LLM_API_KEY=sk-ant-...
+NOVA_LLM_API_KEY=***
 ```
 
 **Ollama (local, free):**
@@ -103,23 +103,6 @@ Output appears in `workspace/research/`:
 - `kb_context.md` — relevant prior KB context
 - `report.md` — synthesised final report
 
-### Blog pipeline
-
-Full pipeline: outline → draft → quality check → revise → publish:
-
-```bash
-nova run blog-pipeline \
-  --context title="Why AI agents will change work" \
-           keywords="AI,automation,productivity"
-```
-
-Output appears in `workspace/blog-pipeline/`:
-- `outline.md`
-- `draft.md`
-- `quality_report.md`
-- `final_post.md`
-- `result.txt` — publish URL or local path
-
 ---
 
 ## Step 5: Inspect results
@@ -129,10 +112,10 @@ Output appears in `workspace/blog-pipeline/`:
 nova list
 
 # Check what ran
-nova status blog-pipeline
+nova status research
 
 # View run history and quality scores
-nova evolution blog-pipeline
+nova evolution research
 
 # Search your knowledge base
 nova kb search "AI"
@@ -145,7 +128,7 @@ nova kb search "AI"
 If a run is interrupted (network error, timeout, Ctrl+C), resume from the exact phase that failed:
 
 ```bash
-nova run blog-pipeline --resume
+nova run research --resume
 ```
 
 NOVA reads the checkpoint and skips phases that already completed successfully.

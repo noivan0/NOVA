@@ -8,13 +8,13 @@ def test_record_and_retrieve():
         evo = EvolutionLog(tmp)
         evo.record(
             run_id="run_001",
-            harness="blog-pipeline",
+            harness="research",
             pattern="pipeline",
             started_at="2026-01-01T00:00:00Z",
             success=True,
             duration_secs=42.0,
             quality_score=85,
-            phases_run=["outline", "draft", "quality_check", "revise"],
+            phases_run=["web_search", "synthesis"],
         )
         entries = evo.recent(5)
         assert len(entries) == 1

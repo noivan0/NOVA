@@ -8,12 +8,11 @@ Supported providers:
   file       — Write to local filesystem (great for static sites)
   wordpress  — WordPress REST API
   ghost      — Ghost Content API
-  blogger    — Google Blogger API (requires OAuth token)
 
 Usage:
   from nova.providers.publisher import get_publisher
   publisher = get_publisher(config.publisher)
-  url = publisher.publish(title="My Post", content="<h1>Hello</h1>", tags=["travel"])
+  url = publisher.publish(title="My Post", content="<h1>Hello</h1>", tags=["ai"])
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ class NullPublisher(Publisher):
 class FilePublisher(Publisher):
     """
     Writes content to a local directory.
-    Useful for static site generators (Hugo, Jekyll, etc.)
+    Useful for static site generators (Hugo, Jekyll, Docusaurus, etc.)
     """
 
     def __init__(self, cfg: PublisherConfig):
@@ -141,7 +140,6 @@ class GhostPublisher(Publisher):
             json.dumps({"exp": now + 300, "iat": now, "aud": "/admin/"}).encode()
         ).rstrip(b"=").decode()
         sig_input = f"{header}.{payload}".encode()
-        # FIX M3: use hmac.HMAC() constructor explicitly (hmac.new is an alias but less clear)
         sig = hmac.HMAC(bytes.fromhex(secret), sig_input, hashlib.sha256).digest()
         sig_b64 = base64.urlsafe_b64encode(sig).rstrip(b"=").decode()
         return f"{header}.{payload}.{sig_b64}"
@@ -166,41 +164,6 @@ class GhostPublisher(Publisher):
 
 
 # --------------------------------------------------------------------------- #
-# Blogger
-# --------------------------------------------------------------------------- #
-
-class BloggerPublisher(Publisher):
-    """
-    Publishes via Google Blogger API v3.
-    Requires: api_key (OAuth2 access token), blog_id
-    """
-
-    def __init__(self, cfg: PublisherConfig):
-        self.access_token = cfg.api_key
-        self.blog_id = cfg.blog_id
-
-    def publish(self, title, content, tags=None, metadata=None) -> Optional[str]:
-        url = f"https://www.googleapis.com/blogger/v3/blogs/{self.blog_id}/posts/"
-        payload = json.dumps({
-            "kind": "blogger#post",
-            "title": title,
-            "content": content,
-            "labels": tags or [],
-        }).encode()
-        req = urllib.request.Request(url, data=payload, headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.access_token}",
-        })
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read())
-                return data.get("url")
-        except Exception as e:
-            print(f"[publisher/blogger] Failed: {e}")
-            return None
-
-
-# --------------------------------------------------------------------------- #
 # Factory
 # --------------------------------------------------------------------------- #
 
@@ -213,7 +176,6 @@ def get_publisher(cfg: PublisherConfig) -> Publisher:
       - "file"      → FilePublisher
       - "wordpress" → WordPressPublisher
       - "ghost"     → GhostPublisher
-      - "blogger"   → BloggerPublisher
     """
     p = cfg.provider.lower()
 
@@ -225,10 +187,8 @@ def get_publisher(cfg: PublisherConfig) -> Publisher:
         return WordPressPublisher(cfg)
     elif p == "ghost":
         return GhostPublisher(cfg)
-    elif p == "blogger":
-        return BloggerPublisher(cfg)
     else:
         raise ValueError(
             f"Unknown publisher provider: '{cfg.provider}'. "
-            f"Valid options: none, file, wordpress, ghost, blogger"
+            f"Valid options: none, file, wordpress, ghost"
         )

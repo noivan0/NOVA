@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NOVA Architecture Diagram</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header { margin-bottom: 1.5rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.4rem; }
+    .pulse-dot {
+      width: 12px; height: 12px;
+      background: #22d3ee; border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -.025em; }
+    .subtitle { color: #94a3b8; font-size: .8rem; margin-left: 1.75rem; }
+    .diagram-container {
+      background: rgba(15,23,42,.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+      overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 1200px; display: block; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .card {
+      background: rgba(15,23,42,.5);
+      border-radius: .75rem;
+      border: 1px solid #1e293b;
+      padding: 1.1rem;
+    }
+    .card-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan  { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.orange { background: #fb923c; }
+    .card-dot.rose  { background: #fb7185; }
+    .card h3 { font-size: .82rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: .72rem; }
+    .card li { margin-bottom: .3rem; }
+    .footer { text-align: center; margin-top: 1.2rem; color: #475569; font-size: .72rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="header-row">
+      <div class="pulse-dot"></div>
+      <h1>NOVA — Complete System Architecture</h1>
+    </div>
+    <p class="subtitle">Single-agent AI orchestration · KB · Memory · Embedding · Harness Engineering · Provider Layer</p>
+  </div>
+
+  <div class="diagram-container">
+  <svg viewBox="0 0 1320 880">
+    <defs>
+      <!-- Arrow markers for different colors -->
+      <marker id="arr-slate" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+        <polygon points="0 0,9 3.5,0 7" fill="#64748b"/>
+      </marker>
+      <marker id="arr-emerald" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+        <polygon points="0 0,9 3.5,0 7" fill="#34d399"/>
+      </marker>
+      <marker id="arr-violet" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+        <polygon points="0 0,9 3.5,0 7" fill="#a78bfa"/>
+      </marker>
+      <marker id="arr-amber" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+        <polygon points="0 0,9 3.5,0 7" fill="#fbbf24"/>
+      </marker>
+      <marker id="arr-orange" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+        <polygon points="0 0,9 3.5,0 7" fill="#fb923c"/>
+      </marker>
+      <marker id="arr-rose" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+        <polygon points="0 0,9 3.5,0 7" fill="#fb7185"/>
+      </marker>
+      <marker id="arr-cyan" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+        <polygon points="0 0,9 3.5,0 7" fill="#22d3ee"/>
+      </marker>
+      <!-- Grid pattern -->
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+      </pattern>
+    </defs>
+
+    <!-- Background -->
+    <rect width="100%" height="100%" fill="url(#grid)"/>
+
+    <!-- ═══════════════════════════════════════════════
+         ARROWS (drawn first so they go behind boxes)
+         ═══════════════════════════════════════════════ -->
+
+    <!-- 1. CLI → Config (slate) -->
+    <line x1="660" y1="66" x2="660" y2="90" stroke="#64748b" stroke-width="1.8" marker-end="url(#arr-slate)"/>
+
+    <!-- 2. Config → Orchestrator (slate) -->
+    <line x1="660" y1="150" x2="660" y2="175" stroke="#64748b" stroke-width="1.8" marker-end="url(#arr-slate)"/>
+
+    <!-- 3. Harness Loader → Phase Chain (emerald) -->
+    <line x1="370" y1="248" x2="370" y2="272" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr-emerald)"/>
+
+    <!-- 4. Checkpoint Resume → Phase Chain (emerald) -->
+    <line x1="580" y1="248" x2="580" y2="272" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr-emerald)"/>
+
+    <!-- 5. Phase Chain → Quality Gate (rose) -->
+    <line x1="380" y1="508" x2="380" y2="528" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arr-rose)"/>
+
+    <!-- 6. Phase Chain → RunBook (rose) -->
+    <line x1="580" y1="508" x2="580" y2="528" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arr-rose)"/>
+
+    <!-- 7. QualityGate + RunBook → Checkpoint Write (emerald) -->
+    <line x1="380" y1="582" x2="380" y2="605" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr-emerald)"/>
+    <line x1="580" y1="582" x2="580" y2="605" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr-emerald)"/>
+
+    <!-- 8. Phase Chain → LLM Provider (emerald curved) -->
+    <path d="M 905 390 Q 930 390 930 295 L 952 295" fill="none" stroke="#34d399" stroke-width="1.8" marker-end="url(#arr-emerald)"/>
+    <text x="912" y="345" fill="#34d399" font-size="8" font-family="monospace">LLM call</text>
+
+    <!-- 9. KB → Phase Chain (violet, bidirectional via two lines) -->
+    <path d="M 218 285 L 242 285 L 242 390 L 262 390" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr-violet)"/>
+    <path d="M 262 415 L 242 415 L 242 320 L 218 320" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-violet)"/>
+    <text x="226" y="357" fill="#a78bfa" font-size="8" font-family="monospace">KB read</text>
+    <text x="224" y="372" fill="#a78bfa" font-size="8" font-family="monospace">KB write</text>
+
+    <!-- 10. Memory/Context → Phase Chain (violet) -->
+    <path d="M 218 595 L 242 595 L 242 450 L 262 450" fill="none" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr-violet)"/>
+    <text x="224" y="525" fill="#a78bfa" font-size="8" font-family="monospace">context</text>
+
+    <!-- 11. Orchestrator → Publisher (orange) -->
+    <path d="M 922 540 L 952 525" fill="none" stroke="#fb923c" stroke-width="1.8" marker-end="url(#arr-orange)"/>
+    <text x="928" y="538" fill="#fb923c" font-size="8" font-family="monospace">publish</text>
+
+    <!-- 12. Orchestrator → Notifier (rose) -->
+    <path d="M 922 650 L 952 710" fill="none" stroke="#fb7185" stroke-width="1.8" marker-end="url(#arr-rose)"/>
+    <text x="925" y="680" fill="#fb7185" font-size="8" font-family="monospace">notify</text>
+
+    <!-- 13. Evolution Log → KB (amber, L-shape) -->
+    <path d="M 242 769 L 120 769 L 120 388" fill="none" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+    <text x="165" y="763" fill="#fbbf24" font-size="8" font-family="monospace">log run</text>
+
+    <!-- 14. KB → Embedding (violet, short) -->
+    <line x1="120" y1="388" x2="120" y2="403" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr-violet)"/>
+
+    <!-- 15. Embedding → Memory (violet, short) -->
+    <line x1="120" y1="508" x2="120" y2="528" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr-violet)"/>
+
+    <!-- ═══════════════════════════════════════════════
+         COMPONENTS
+         ═══════════════════════════════════════════════ -->
+
+    <!-- ── CLI Layer (cyan) ── -->
+    <rect x="325" y="18" width="670" height="48" rx="6" fill="#0f172a"/>
+    <rect x="325" y="18" width="670" height="48" rx="6" fill="rgba(8,51,68,.45)" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="660" y="38" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">CLI — Command Layer</text>
+    <text x="660" y="56" fill="#94a3b8" font-size="8.5" text-anchor="middle" font-family="monospace">nova run &lt;harness&gt; [--resume] [--dry-run] --context k=v  ·  nova list  ·  nova status  ·  nova evolution  ·  nova kb  ·  nova new</text>
+
+    <!-- ── Config Layer (amber) ── -->
+    <rect x="242" y="90" width="836" height="60" rx="6" fill="#0f172a"/>
+    <rect x="242" y="90" width="836" height="60" rx="6" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="660" y="112" fill="#fbbf24" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Configuration — 3-Layer Merge</text>
+    <text x="660" y="128" fill="#94a3b8" font-size="8.5" text-anchor="middle" font-family="monospace">Built-in defaults  →  nova.yaml  →  NOVA_* environment variables  ·  LLM · Notifier · Publisher · KB · workspace · phase_timeout · max_retries · quality_threshold</text>
+    <text x="660" y="143" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="monospace">Later layers override earlier · env vars always win</text>
+
+    <!-- ── Orchestrator Boundary (dashed emerald) ── -->
+    <rect x="242" y="175" width="680" height="555" rx="10" fill="rgba(6,78,59,.07)" stroke="#34d399" stroke-width="1.2" stroke-dasharray="6,4"/>
+    <text x="255" y="192" fill="#34d399" font-size="9" font-weight="600" font-family="monospace">Orchestrator / Harness Engine</text>
+
+    <!-- ── Harness Loader (emerald) ── -->
+    <rect x="262" y="198" width="200" height="50" rx="6" fill="#0f172a"/>
+    <rect x="262" y="198" width="200" height="50" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="362" y="220" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Harness Loader</text>
+    <text x="362" y="236" fill="#94a3b8" font-size="8.5" text-anchor="middle" font-family="monospace">Parses harness.yaml</text>
+    <text x="362" y="248" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="monospace">Validates phases + rules</text>
+
+    <!-- ── Checkpoint Resume (emerald) ── -->
+    <rect x="478" y="198" width="200" height="50" rx="6" fill="#0f172a"/>
+    <rect x="478" y="198" width="200" height="50" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="578" y="220" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Checkpoint Resume</text>
+    <text x="578" y="236" fill="#94a3b8" font-size="8.5" text-anchor="middle" font-family="monospace">Restores last saved state</text>
+    <text x="578" y="248" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="monospace">--resume skips done phases</text>
+
+    <!-- ── Phase Chain Box (inner boundary, dashed) ── -->
+    <rect x="262" y="272" width="640" height="236" rx="8" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1" stroke-dasharray="5,4"/>
+    <text x="274" y="287" fill="#34d399" font-size="8.5" font-weight="600" font-family="monospace">Phase Chain — Harness Engineering</text>
+
+    <!-- Pipeline pattern row -->
+    <text x="274" y="306" fill="#94a3b8" font-size="8" font-family="monospace">pipeline:</text>
+    <!-- P1 box -->
+    <rect x="315" y="293" width="62" height="24" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="346" y="308" fill="white" font-size="8" text-anchor="middle" font-family="monospace">Phase 1</text>
+    <line x1="377" y1="305" x2="390" y2="305" stroke="#34d399" stroke-width="1.2" marker-end="url(#arr-emerald)"/>
+    <!-- P2 box -->
+    <rect x="390" y="293" width="62" height="24" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="421" y="308" fill="white" font-size="8" text-anchor="middle" font-family="monospace">Phase 2</text>
+    <line x1="452" y1="305" x2="465" y2="305" stroke="#34d399" stroke-width="1.2" marker-end="url(#arr-emerald)"/>
+    <!-- P3 box -->
+    <rect x="465" y="293" width="62" height="24" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="496" y="308" fill="white" font-size="8" text-anchor="middle" font-family="monospace">Phase 3</text>
+    <line x1="527" y1="305" x2="540" y2="305" stroke="#34d399" stroke-width="1.2" marker-end="url(#arr-emerald)"/>
+    <!-- Pn box -->
+    <rect x="540" y="293" width="62" height="24" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="571" y="308" fill="white" font-size="8" text-anchor="middle" font-family="monospace">Phase N</text>
+    <text x="620" y="308" fill="#94a3b8" font-size="9" font-family="monospace">→ output</text>
+
+    <!-- Fanout pattern row -->
+    <text x="274" y="345" fill="#94a3b8" font-size="8" font-family="monospace">fanout:</text>
+    <!-- A, B, C boxes -->
+    <rect x="315" y="332" width="55" height="22" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="342" y="346" fill="white" font-size="8" text-anchor="middle" font-family="monospace">Phase A</text>
+    <rect x="380" y="332" width="55" height="22" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="407" y="346" fill="white" font-size="8" text-anchor="middle" font-family="monospace">Phase B</text>
+    <rect x="445" y="332" width="55" height="22" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="472" y="346" fill="white" font-size="8" text-anchor="middle" font-family="monospace">Phase C</text>
+    <!-- merge -->
+    <line x1="500" y1="343" x2="515" y2="343" stroke="#34d399" stroke-width="1" marker-end="url(#arr-emerald)"/>
+    <rect x="515" y="332" width="55" height="22" rx="4" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1"/>
+    <text x="542" y="346" fill="#fbbf24" font-size="8" text-anchor="middle" font-family="monospace">→ merge</text>
+    <text x="590" y="346" fill="#94a3b8" font-size="8" font-family="monospace">_fanout_results</text>
+
+    <!-- Executor row -->
+    <text x="274" y="382" fill="#94a3b8" font-size="8" font-family="monospace">executor:</text>
+    <!-- llm -->
+    <rect x="318" y="370" width="72" height="28" rx="4" fill="rgba(6,78,59,.6)" stroke="#34d399" stroke-width="1.2"/>
+    <text x="354" y="383" fill="white" font-size="9" font-weight="600" text-anchor="middle" font-family="monospace">llm</text>
+    <text x="354" y="394" fill="#34d399" font-size="7.5" text-anchor="middle" font-family="monospace">LLM call</text>
+    <!-- shell -->
+    <rect x="400" y="370" width="72" height="28" rx="4" fill="rgba(6,78,59,.6)" stroke="#34d399" stroke-width="1.2"/>
+    <text x="436" y="383" fill="white" font-size="9" font-weight="600" text-anchor="middle" font-family="monospace">shell</text>
+    <text x="436" y="394" fill="#34d399" font-size="7.5" text-anchor="middle" font-family="monospace">subprocess</text>
+    <!-- python -->
+    <rect x="482" y="370" width="72" height="28" rx="4" fill="rgba(6,78,59,.6)" stroke="#34d399" stroke-width="1.2"/>
+    <text x="518" y="383" fill="white" font-size="9" font-weight="600" text-anchor="middle" font-family="monospace">python</text>
+    <text x="518" y="394" fill="#34d399" font-size="7.5" text-anchor="middle" font-family="monospace">inline exec</text>
+    <!-- passthrough -->
+    <rect x="564" y="370" width="80" height="28" rx="4" fill="rgba(6,78,59,.6)" stroke="#34d399" stroke-width="1.2"/>
+    <text x="604" y="383" fill="white" font-size="9" font-weight="600" text-anchor="middle" font-family="monospace">passthrough</text>
+    <text x="604" y="394" fill="#34d399" font-size="7.5" text-anchor="middle" font-family="monospace">forward ctx</text>
+
+    <!-- Prompt chaining label -->
+    <text x="660" y="418" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">output_file → input_files → prompt {{variable}} · context[key] · _phase_&lt;id&gt;</text>
+
+    <!-- input/output label -->
+    <text x="660" y="430" fill="#64748b" font-size="7.5" text-anchor="middle" font-family="monospace">workspace/ artifacts · checkpoint saved after every phase · quality_check · on_failure: retry|skip|abort</text>
+
+    <!-- Patterns label at bottom of phase chain -->
+    <text x="660" y="462" fill="#64748b" font-size="8" text-anchor="middle" font-family="monospace">pattern: pipeline | fanout | supervisor | generative  ·  persona: system prompt injected into all LLM phases</text>
+
+    <!-- ── Quality Gate (rose) ── -->
+    <rect x="262" y="528" width="192" height="54" rx="6" fill="#0f172a"/>
+    <rect x="262" y="528" width="192" height="54" rx="6" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="358" y="548" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Quality Gate</text>
+    <text x="358" y="562" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="monospace">Parse SCORE: N/100 from output</text>
+    <text x="358" y="574" fill="#fb7185" font-size="8" text-anchor="middle" font-family="monospace">score &lt; threshold → retry</text>
+
+    <!-- ── RunBook (rose) ── -->
+    <rect x="470" y="528" width="192" height="54" rx="6" fill="#0f172a"/>
+    <rect x="470" y="528" width="192" height="54" rx="6" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="566" y="548" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">RunBook</text>
+    <text x="566" y="562" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="monospace">symptom → action rules</text>
+    <text x="566" y="574" fill="#fb7185" font-size="8" text-anchor="middle" font-family="monospace">wait:N · notify · skip · abort</text>
+
+    <!-- ── Checkpoint Write / State (emerald) ── -->
+    <rect x="262" y="605" width="400" height="50" rx="6" fill="#0f172a"/>
+    <rect x="262" y="605" width="400" height="50" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="462" y="626" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Checkpoint Save</text>
+    <text x="462" y="641" fill="#94a3b8" font-size="8.5" text-anchor="middle" font-family="monospace">JSON state after each phase · nova run --resume restores from last point</text>
+    <text x="462" y="651" fill="#94a3b8" font-size="7.5" text-anchor="middle" font-family="monospace">workspace/.nova/checkpoint.json</text>
+
+    <!-- ── Evolution Log (amber) ── -->
+    <rect x="242" y="745" width="680" height="58" rx="6" fill="#0f172a"/>
+    <rect x="242" y="745" width="680" height="58" rx="6" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="582" y="766" fill="#fbbf24" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Evolution Log — Self-Improving Run History</text>
+    <text x="582" y="781" fill="#94a3b8" font-size="8.5" text-anchor="middle" font-family="monospace">evolution.md (Markdown per-run entry) + evolution.jsonl (machine-readable) · tracks: quality score trend · success rate · phase failures · published URLs</text>
+    <text x="582" y="795" fill="#94a3b8" font-size="7.5" text-anchor="middle" font-family="monospace">nova evolution &lt;harness&gt; · consecutive failure alerts · average quality tracking</text>
+
+    <!-- ═══════════════════════════════════════════════
+         LEFT COLUMN: KB SYSTEM
+         ═══════════════════════════════════════════════ -->
+
+    <!-- ── Knowledge Base (violet) ── -->
+    <rect x="14" y="175" width="212" height="213" rx="6" fill="#0f172a"/>
+    <rect x="14" y="175" width="212" height="213" rx="6" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="120" y="198" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Knowledge Base (KB)</text>
+    <text x="120" y="213" fill="#a78bfa" font-size="8" text-anchor="middle" font-family="monospace">Persistent Markdown Store</text>
+    <text x="30" y="232" fill="#94a3b8" font-size="8" font-family="monospace">kb/</text>
+    <text x="38" y="248" fill="#94a3b8" font-size="8" font-family="monospace">├─ index.md  (TOC)</text>
+    <text x="38" y="262" fill="#94a3b8" font-size="8" font-family="monospace">├─ log.md    (activity)</text>
+    <text x="38" y="276" fill="#94a3b8" font-size="8" font-family="monospace">├─ config/   (settings)</text>
+    <text x="38" y="290" fill="#94a3b8" font-size="8" font-family="monospace">├─ projects/ (per-harness)</text>
+    <text x="38" y="304" fill="#94a3b8" font-size="8" font-family="monospace">├─ fixes/    (workarounds)</text>
+    <text x="38" y="318" fill="#94a3b8" font-size="8" font-family="monospace">└─ user/     (preferences)</text>
+    <text x="30" y="336" fill="#a78bfa" font-size="8" font-family="monospace">nova kb search "query"</text>
+    <text x="30" y="350" fill="#a78bfa" font-size="8" font-family="monospace">nova kb write key file.md</text>
+    <text x="30" y="364" fill="#64748b" font-size="7.5" font-family="monospace">context["_kb"].read/write()</text>
+    <text x="30" y="378" fill="#64748b" font-size="7.5" font-family="monospace">{{kb:projects/my-notes}}</text>
+
+    <!-- ── Embedding & Indexing (violet) ── -->
+    <rect x="14" y="403" width="212" height="115" rx="6" fill="#0f172a"/>
+    <rect x="14" y="403" width="212" height="115" rx="6" fill="rgba(76,29,149,.35)" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="120" y="424" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Embedding &amp; Index</text>
+    <text x="120" y="440" fill="#a78bfa" font-size="8" text-anchor="middle" font-family="monospace">Semantic KB Search</text>
+    <text x="30" y="457" fill="#94a3b8" font-size="8" font-family="monospace">• Vector embeddings (opt.)</text>
+    <text x="30" y="471" fill="#94a3b8" font-size="8" font-family="monospace">• Hybrid: keyword + semantic</text>
+    <text x="30" y="485" fill="#94a3b8" font-size="8" font-family="monospace">• Full-text search (built-in)</text>
+    <text x="30" y="499" fill="#94a3b8" font-size="8" font-family="monospace">• embeddings.db (SQLite)</text>
+    <text x="30" y="511" fill="#64748b" font-size="7.5" font-family="monospace">kb_unified_search.py</text>
+
+    <!-- ── Memory / Context Store (violet) ── -->
+    <rect x="14" y="528" width="212" height="125" rx="6" fill="#0f172a"/>
+    <rect x="14" y="528" width="212" height="125" rx="6" fill="rgba(76,29,149,.35)" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="120" y="548" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Memory / Context</text>
+    <text x="120" y="563" fill="#a78bfa" font-size="8" text-anchor="middle" font-family="monospace">In-Process State</text>
+    <text x="30" y="580" fill="#94a3b8" font-size="8" font-family="monospace">• context{} dict (runtime)</text>
+    <text x="30" y="594" fill="#94a3b8" font-size="8" font-family="monospace">• _phase_&lt;id&gt; outputs</text>
+    <text x="30" y="608" fill="#94a3b8" font-size="8" font-family="monospace">• _fanout_results</text>
+    <text x="30" y="622" fill="#94a3b8" font-size="8" font-family="monospace">• _last_quality_score</text>
+    <text x="30" y="636" fill="#94a3b8" font-size="8" font-family="monospace">• --context k=v (CLI)</text>
+    <text x="30" y="648" fill="#64748b" font-size="7.5" font-family="monospace">{{variable}} in prompts</text>
+
+    <!-- ═══════════════════════════════════════════════
+         RIGHT COLUMN: PROVIDERS
+         ═══════════════════════════════════════════════ -->
+
+    <!-- ── LLM Provider (emerald) ── -->
+    <rect x="953" y="175" width="320" height="252" rx="6" fill="#0f172a"/>
+    <rect x="953" y="175" width="320" height="252" rx="6" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+    <text x="1113" y="198" fill="white" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">LLM Provider</text>
+    <text x="1113" y="213" fill="#34d399" font-size="8" text-anchor="middle" font-family="monospace">Pluggable — swap via config</text>
+    <!-- OpenAI -->
+    <rect x="968" y="224" width="288" height="34" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="980" y="239" fill="white" font-size="9" font-weight="600" font-family="monospace">OpenAI</text>
+    <text x="980" y="252" fill="#94a3b8" font-size="7.5" font-family="monospace">gpt-5 · gpt-4.1 · gpt-4.1-mini · gpt-4.1-nano · o3 · o4-mini</text>
+    <!-- Anthropic -->
+    <rect x="968" y="265" width="288" height="34" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="980" y="280" fill="white" font-size="9" font-weight="600" font-family="monospace">Anthropic</text>
+    <text x="980" y="293" fill="#94a3b8" font-size="7.5" font-family="monospace">claude-opus-4-5 · claude-sonnet-4-5 · claude-haiku-3-5</text>
+    <!-- Ollama -->
+    <rect x="968" y="306" width="288" height="34" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="980" y="321" fill="white" font-size="9" font-weight="600" font-family="monospace">Ollama (local)</text>
+    <text x="980" y="334" fill="#94a3b8" font-size="7.5" font-family="monospace">llama3.3 · gemma3 · qwen3 · mistral · deepseek-r1</text>
+    <!-- Custom -->
+    <rect x="968" y="347" width="136" height="34" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="980" y="362" fill="white" font-size="9" font-weight="600" font-family="monospace">Custom</text>
+    <text x="980" y="375" fill="#94a3b8" font-size="7.5" font-family="monospace">OpenAI-compat.</text>
+    <!-- Echo -->
+    <rect x="1112" y="347" width="144" height="34" rx="4" fill="rgba(6,78,59,.5)" stroke="#34d399" stroke-width="1"/>
+    <text x="1124" y="362" fill="white" font-size="9" font-weight="600" font-family="monospace">Echo</text>
+    <text x="1124" y="375" fill="#94a3b8" font-size="7.5" font-family="monospace">Testing (no key)</text>
+    <!-- note -->
+    <text x="1113" y="416" fill="#64748b" font-size="7.5" text-anchor="middle" font-family="monospace">Reasoning models: auto max_completion_tokens · no temperature</text>
+    <text x="1113" y="426" fill="#64748b" font-size="7" text-anchor="middle" font-family="monospace">Implement LLMProvider.complete() to add custom provider</text>
+
+    <!-- ── Publisher (orange) ── -->
+    <rect x="953" y="440" width="320" height="178" rx="6" fill="#0f172a"/>
+    <rect x="953" y="440" width="320" height="178" rx="6" fill="rgba(251,146,60,.28)" stroke="#fb923c" stroke-width="1.5"/>
+    <text x="1113" y="462" fill="#fb923c" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Publisher</text>
+    <text x="1113" y="477" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="monospace">Content output — configured not coded</text>
+    <text x="970" y="496" fill="#94a3b8" font-size="8.5" font-family="monospace">• File     — local filesystem (Hugo, Jekyll…)</text>
+    <text x="970" y="512" fill="#94a3b8" font-size="8.5" font-family="monospace">• WordPress — REST API v2 + App Password</text>
+    <text x="970" y="528" fill="#94a3b8" font-size="8.5" font-family="monospace">• Ghost    — Admin API v5 · id:hex_secret</text>
+    <text x="970" y="544" fill="#94a3b8" font-size="8.5" font-family="monospace">• Blogger  — Google API v3 · OAuth2 token</text>
+    <text x="970" y="560" fill="#94a3b8" font-size="8.5" font-family="monospace">• None     — content stays in workspace/</text>
+    <text x="1113" y="590" fill="#64748b" font-size="7.5" text-anchor="middle" font-family="monospace">publisher.publish(title, content, tags) → URL</text>
+    <text x="1113" y="602" fill="#64748b" font-size="7" text-anchor="middle" font-family="monospace">Implement Publisher.publish() to add custom platform</text>
+    <text x="1113" y="612" fill="#64748b" font-size="7" text-anchor="middle" font-family="monospace">Accessed as context["_publisher"] in python phases</text>
+
+    <!-- ── Notifier (rose) ── -->
+    <rect x="953" y="633" width="320" height="157" rx="6" fill="#0f172a"/>
+    <rect x="953" y="633" width="320" height="157" rx="6" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="1113" y="654" fill="#fb7185" font-size="10" font-weight="600" text-anchor="middle" font-family="monospace">Notifier</text>
+    <text x="1113" y="669" fill="#94a3b8" font-size="8" text-anchor="middle" font-family="monospace">Alerts on completion or failure</text>
+    <text x="970" y="688" fill="#94a3b8" font-size="8.5" font-family="monospace">• Telegram — Bot API · token + chat_id</text>
+    <text x="970" y="704" fill="#94a3b8" font-size="8.5" font-family="monospace">• Slack    — Incoming Webhook URL</text>
+    <text x="970" y="720" fill="#94a3b8" font-size="8.5" font-family="monospace">• Discord  — Webhook URL</text>
+    <text x="970" y="736" fill="#94a3b8" font-size="8.5" font-family="monospace">• Webhook  — Generic HTTP POST JSON</text>
+    <text x="970" y="752" fill="#94a3b8" font-size="8.5" font-family="monospace">• None     — Silent (default)</text>
+    <text x="1113" y="776" fill="#64748b" font-size="7.5" text-anchor="middle" font-family="monospace">notifier.send(message) → bool</text>
+
+    <!-- ═══════════════════════════════════════════════
+         LEGEND (top-right)
+         ═══════════════════════════════════════════════ -->
+    <rect x="14" y="678" width="212" height="125" rx="6" fill="rgba(15,23,42,.6)" stroke="#1e293b" stroke-width="1"/>
+    <text x="26" y="696" fill="white" font-size="9" font-weight="600" font-family="monospace">Legend</text>
+    <rect x="26" y="703" width="14" height="10" rx="2" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1"/>
+    <text x="46" y="712" fill="#94a3b8" font-size="8" font-family="monospace">CLI / User Interface</text>
+    <rect x="26" y="720" width="14" height="10" rx="2" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1"/>
+    <text x="46" y="729" fill="#94a3b8" font-size="8" font-family="monospace">Core Engine / Provider</text>
+    <rect x="26" y="737" width="14" height="10" rx="2" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1"/>
+    <text x="46" y="746" fill="#94a3b8" font-size="8" font-family="monospace">Knowledge / Memory / DB</text>
+    <rect x="26" y="754" width="14" height="10" rx="2" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1"/>
+    <text x="46" y="763" fill="#94a3b8" font-size="8" font-family="monospace">Config / Logging / History</text>
+    <rect x="26" y="771" width="14" height="10" rx="2" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1"/>
+    <text x="46" y="780" fill="#94a3b8" font-size="8" font-family="monospace">Publisher / Output</text>
+    <rect x="26" y="788" width="14" height="10" rx="2" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1"/>
+    <text x="46" y="797" fill="#94a3b8" font-size="8" font-family="monospace">Quality / Security / Alert</text>
+
+  </svg>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="card-header"><div class="card-dot emerald"></div><h3>Execution Flow</h3></div>
+      <ul>
+        <li>• CLI parses harness name + context vars</li>
+        <li>• Config merged from defaults → YAML → env</li>
+        <li>• Harness Loader validates harness.yaml</li>
+        <li>• Checkpoint restored if --resume passed</li>
+        <li>• Orchestrator runs phases sequentially (pipeline) or in parallel batches (fanout)</li>
+        <li>• Quality Gate retries if score &lt; threshold</li>
+        <li>• RunBook handles known failure patterns</li>
+        <li>• Checkpoint saved after every phase</li>
+        <li>• Evolution Log appended on completion</li>
+        <li>• Notifier sends alert; Publisher outputs content</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-dot violet"></div><h3>KB + Memory Design</h3></div>
+      <ul>
+        <li>• KB = persistent Markdown files across all runs</li>
+        <li>• Memory = in-process context{} dict (one run)</li>
+        <li>• context["_phase_&lt;id&gt;"] carries phase output</li>
+        <li>• context["_fanout_results"] merges parallel phases</li>
+        <li>• KB injected into prompts via {{kb:path/to/page}}</li>
+        <li>• Embedding index enables semantic KB search</li>
+        <li>• Hybrid search: full-text + vector similarity</li>
+        <li>• kb.append_log() maintains activity audit trail</li>
+        <li>• KB survives process restarts and --resume</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-dot amber"></div><h3>Harness Engineering</h3></div>
+      <ul>
+        <li>• pipeline: P1 output → P2 input → P3 ... (chain)</li>
+        <li>• fanout: A,B,C parallel → merge → synthesis</li>
+        <li>• supervisor: strict quality enforcement pipeline</li>
+        <li>• generative: creative pipeline, tolerant failure</li>
+        <li>• Prompt chaining: {{variable}} + input_files</li>
+        <li>• Quality gate: SCORE: N/100 parsed from LLM</li>
+        <li>• RunBook: symptom → wait:N | notify | skip | abort</li>
+        <li>• Evolution Log learns from every run</li>
+        <li>• nova new &lt;name&gt; scaffolds harness skeleton</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-dot orange"></div><h3>Provider Layer</h3></div>
+      <ul>
+        <li>• All providers are pluggable — one config line swap</li>
+        <li>• LLM: OpenAI · Anthropic · Ollama · Custom · Echo</li>
+        <li>• GPT-5 (1M ctx), GPT-4.1, o3/o4-mini supported</li>
+        <li>• Claude Opus 4 (claude-opus-4-5) · Sonnet 4 supported</li>
+        <li>• Ollama: local inference, no API key, no cost</li>
+        <li>• Publisher: WordPress · Ghost · Blogger · File</li>
+        <li>• Notifier: Telegram · Slack · Discord · Webhook</li>
+        <li>• Custom: implement LLMProvider.complete() interface</li>
+        <li>• Echo provider: all tests pass with zero API calls</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="footer">NOVA — github.com/noivan0/NOVA · MIT License · Single-agent AI orchestration framework</p>
+</div>
+</body>
+</html>

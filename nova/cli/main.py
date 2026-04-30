@@ -223,7 +223,7 @@ version: "1.0.0"
 pattern: {pattern}
 
 # persona: describe your target user here (optional but recommended)
-# persona: "A professional blogger who publishes weekly travel content."
+# persona: "A senior researcher producing comprehensive analysis reports."
 
 phases:
   - id: step_1

@@ -109,10 +109,7 @@ where quality matters more than speed.
 
 ```json
 {
-  "harness": "blog-pipeline",
-  "run_id": "run_20260425_100000_abc123",
-  "phase": 2,
-  "phase_id": "quality_check",
+  "harness": "research",
   "state": { "topic": "Paris", "format": "long-form" },
   "started_at": "2026-04-25T10:00:00Z",
   "phase_started_at": "2026-04-25T10:03:22Z",
@@ -130,14 +127,14 @@ cleared and the run restarts from the beginning.
 ```json
 {
   "run_id": "run_20260425_100000_abc123",
-  "harness": "blog-pipeline",
+  "harness": "research",
   "pattern": "pipeline",
   "started_at": "2026-04-25T10:00:00Z",
   "finished_at": "2026-04-25T10:04:32Z",
   "duration_secs": 272.4,
   "success": true,
   "quality_score": 82,
-  "phases_run": ["outline", "draft", "quality_check", "revise", "publish"],
+  "phases_run": ["web_search", "synthesis"],
   "phases_failed": [],
   "runbook_fired": [],
   "improvements": [],

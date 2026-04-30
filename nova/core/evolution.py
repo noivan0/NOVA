@@ -11,7 +11,7 @@ programmatic analysis.
 Entry schema (JSON):
 {
   "run_id":        "run_20260425_100000_abc123",
-  "harness":       "blog-pipeline",
+  "harness":       "research",
   "pattern":       "pipeline",
   "started_at":    "ISO8601",
   "finished_at":   "ISO8601",

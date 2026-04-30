@@ -36,9 +36,8 @@ class NotifierConfig:
 
 @dataclass
 class PublisherConfig:
-    provider: str = "none"            # none | blogger | wordpress | ghost | file
+    provider: str = "none"            # none | wordpress | ghost | file
     api_key: str = ""
-    blog_id: str = ""
     base_url: str = ""
     output_dir: str = "./output"
 
@@ -146,7 +145,6 @@ def _apply_yaml(cfg: NOVAConfig, raw: dict) -> None:
         pb = raw["publisher"]
         cfg.publisher.provider = pb.get("provider", cfg.publisher.provider)
         cfg.publisher.api_key = pb.get("api_key", cfg.publisher.api_key)
-        cfg.publisher.blog_id = pb.get("blog_id", cfg.publisher.blog_id)
         cfg.publisher.base_url = pb.get("base_url", cfg.publisher.base_url)
         cfg.publisher.output_dir = pb.get("output_dir", cfg.publisher.output_dir)
 
@@ -197,8 +195,6 @@ def _apply_env(cfg: NOVAConfig) -> None:
         cfg.publisher.provider = v
     if v := env("NOVA_PUBLISHER_API_KEY"):
         cfg.publisher.api_key = v
-    if v := env("NOVA_PUBLISHER_BLOG_ID"):
-        cfg.publisher.blog_id = v
     if v := env("NOVA_PUBLISHER_BASE_URL"):
         cfg.publisher.base_url = v
     if v := env("NOVA_PUBLISHER_OUTPUT_DIR"):

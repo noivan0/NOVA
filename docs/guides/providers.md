@@ -8,7 +8,7 @@ This guide covers setup for all LLM, notifier, and publisher providers.
 
 ### OpenAI
 
-**Models:** `gpt-4.1`, `gpt-4o`, `gpt-4o-mini`, `o3`, `o4-mini`, `gpt-4.1-mini`
+**Models:** `gpt-5.5`, `gpt-5`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o3`, `o4-mini`
 
 ```bash
 pip install "nova-orchestrator[openai]"
@@ -19,7 +19,7 @@ pip install "nova-orchestrator[openai]"
 ```bash
 NOVA_LLM_PROVIDER=openai
 NOVA_LLM_MODEL=gpt-4o
-NOVA_LLM_API_KEY=sk-...
+NOVA_LLM_API_KEY=***
 ```
 
 **Reasoning models** (`o3`, `o4-mini`): NOVA automatically omits `temperature` and uses
@@ -29,7 +29,7 @@ NOVA_LLM_API_KEY=sk-...
 
 ### Anthropic Claude
 
-**Models:** `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-6`
+**Models:** `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`
 
 ```bash
 pip install "nova-orchestrator[anthropic]"
@@ -39,7 +39,7 @@ pip install "nova-orchestrator[anthropic]"
 ```bash
 NOVA_LLM_PROVIDER=anthropic
 NOVA_LLM_MODEL=claude-sonnet-4-6
-NOVA_LLM_API_KEY=sk-ant-...
+NOVA_LLM_API_KEY=***
 ```
 
 ---
@@ -83,7 +83,7 @@ Works with: Azure OpenAI, LM Studio, vLLM, LocalAI, any OpenAI-compatible gatewa
 NOVA_LLM_PROVIDER=custom
 NOVA_LLM_MODEL=my-model-name
 NOVA_LLM_BASE_URL=https://my-gateway.example.com/v1
-NOVA_LLM_API_KEY=my-api-key
+NOVA_LLM_API_KEY=***
 ```
 
 **Azure OpenAI example:**
@@ -91,7 +91,7 @@ NOVA_LLM_API_KEY=my-api-key
 NOVA_LLM_PROVIDER=custom
 NOVA_LLM_MODEL=gpt-4o
 NOVA_LLM_BASE_URL=https://my-resource.openai.azure.com/openai/deployments/my-deployment/
-NOVA_LLM_API_KEY=my-azure-key
+NOVA_LLM_API_KEY=***
 ```
 
 ---
@@ -135,7 +135,7 @@ Get notified when a harness completes or fails via Telegram.
 `.env`:
 ```bash
 NOVA_NOTIFIER_PROVIDER=telegram
-NOVA_NOTIFIER_TOKEN=1234567890:ABCdef...
+NOVA_NOTIFIER_TOKEN=123456...f...
 NOVA_NOTIFIER_CHAT_ID=-1001234567890
 ```
 
@@ -156,7 +156,7 @@ Create a webhook: Slack App → Incoming Webhooks → Add New Webhook to Workspa
 
 ```bash
 NOVA_NOTIFIER_PROVIDER=discord
-NOVA_NOTIFIER_WEBHOOK_URL=https://discord.com/api/webhooks/.../.../
+NOVA_NOTIFIER_WEBHOOK_URL=https://discord.com/api/webhooks/.../.../ 
 ```
 
 Create a webhook: Discord Server → Channel Settings → Integrations → Webhooks.
@@ -174,7 +174,7 @@ NOVA_NOTIFIER_WEBHOOK_URL=https://my-server.example.com/nova-webhook
 
 Payload format:
 ```json
-{"text": "NOVA harness 'blog-pipeline' completed successfully. Quality: 88"}
+{"text": "NOVA harness 'research' completed successfully. Quality: 88"}
 ```
 
 ---
@@ -215,7 +215,7 @@ Uses WordPress REST API v2 with Application Passwords (no plugin required, WordP
 ```bash
 NOVA_PUBLISHER_PROVIDER=wordpress
 NOVA_PUBLISHER_BASE_URL=https://myblog.com
-NOVA_PUBLISHER_API_KEY=myusername:xxxx xxxx xxxx xxxx xxxx xxxx
+NOVA_PUBLISHER_API_KEY=*** xxxx xxxx xxxx xxxx xxxx
 ```
 
 Posts are created as drafts by default. Modify `nova/providers/publisher.py`
@@ -234,29 +234,8 @@ Uses Ghost Admin API v5 with an Admin API key.
 ```bash
 NOVA_PUBLISHER_PROVIDER=ghost
 NOVA_PUBLISHER_BASE_URL=https://myblog.ghost.io
-NOVA_PUBLISHER_API_KEY=6478f...abc:1a2b3c...
+NOVA_PUBLISHER_API_KEY=6478f....c...
 ```
-
----
-
-### Blogger
-
-Uses Google Blogger API v3 with a Google OAuth2 access token.
-
-**Setup:**
-1. Google Cloud Console → Create project → Enable Blogger API
-2. Create OAuth2 credentials
-3. Get your access token (use `google-auth` library or OAuth playground)
-4. Get your Blog ID from: Blogger Dashboard → Settings → Blog ID
-
-```bash
-NOVA_PUBLISHER_PROVIDER=blogger
-NOVA_PUBLISHER_API_KEY=ya29.a0AfH...    # OAuth2 access token
-NOVA_PUBLISHER_BLOG_ID=1234567890
-```
-
-Note: OAuth2 access tokens expire in 1 hour. For long-running scheduled workflows,
-implement token refresh or use a service account.
 
 ---
 
@@ -284,7 +263,7 @@ from nova.core.config import load_config
 from nova.providers.publisher import get_publisher
 cfg = load_config('nova.yaml')
 p = get_publisher(cfg.publisher)
-url = p.publish(title='NOVA test', content='<p>Test post from NOVA</p>')
+url = p.publish(title='NOVA test', content='<p>Test output from NOVA</p>')
 print('URL:', url)
 "
 ```

@@ -25,10 +25,9 @@ notifier:
 
 # ── Publisher ──────────────────────────────────────────────────────────────
 publisher:
-  provider: file                # none | file | wordpress | ghost | blogger
-  output_dir: ./output          # For file publisher: where to write posts
+  provider: file                # none | file | wordpress | ghost
+  output_dir: ./output          # For file publisher: where to write output
   # api_key: ""                 # For WordPress: "user:app_password", Ghost: "id:secret"
-  # blog_id: ""                 # For Blogger
   # base_url: ""                # For WordPress / Ghost site URL
 
 # ── Knowledge Base ─────────────────────────────────────────────────────────
