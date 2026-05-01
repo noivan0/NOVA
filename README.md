@@ -8,6 +8,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
+  <img src="https://github.com/noivan0/NOVA/actions/workflows/ci.yml/badge.svg" alt="CI"/>
   <img src="https://img.shields.io/badge/tests-14%20passing-brightgreen?style=flat-square" alt="Tests"/>
   <img src="https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic%20%7C%20Ollama-orange?style=flat-square" alt="LLM Providers"/>
 </p>
@@ -735,9 +736,13 @@ NOVA/
 │   └── cli/
 │       └── main.py          # `nova` CLI — run / list / status / evolution / kb / new
 ├── harnesses/
-│   └── research/            # Multi-angle research synthesis (fanout pattern)
-│       ├── harness.yaml
-│       └── prompts/         # web_search.txt · synthesis.txt
+│   ├── research/            # Multi-angle research synthesis (fanout pattern)
+│   │   ├── harness.yaml
+│   │   └── prompts/         # web_search.txt · synthesis.txt
+│   ├── summarizer/          # Multi-level content summarizer (TL;DR → deep analysis)
+│   │   └── harness.yaml
+│   └── data-pipeline/       # CSV profiling + LLM insight extraction + report
+│       └── harness.yaml
 ├── examples/
 │   ├── quickstart.py        # Minimal programmatic usage example
 │   ├── custom_provider.py   # How to implement a custom LLM provider
@@ -751,7 +756,10 @@ NOVA/
 │       ├── quickstart.md        # Step-by-step first run guide
 │       ├── writing-harnesses.md # Complete harness authoring guide
 │       ├── providers.md         # Provider setup (OpenAI, Anthropic, Ollama, …)
+│       ├── quality-gates.md     # How quality scoring works
 │       └── custom-provider.md   # How to add a custom LLM / publisher / notifier
+├── CONTRIBUTING.md          # Contributor guide (setup, style, PR process)
+├── CHANGELOG.md             # Version history
 ├── docker-compose.yml       # Docker Compose for containerised runs
 ├── nova.yaml                # Default configuration (edit this)
 ├── .env.example             # Environment variable template
@@ -868,14 +876,22 @@ by adding it to the `get_llm_provider()` / `get_publisher()` factory functions.
 
 Contributions are welcome — bug fixes, new providers, new harness examples, documentation.
 
-1. Fork the repository
-2. `pip install -e ".[dev]"`
-3. Create a branch: `git checkout -b feat/my-feature`
-4. Add tests for your change
-5. Run the test suite: `pytest tests/ -v`
-6. Open a pull request
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full guide: development setup, code style, test requirements, and PR process.
 
-Please keep PRs focused. One feature or fix per PR.
+Quick start for contributors:
+
+```bash
+git clone https://github.com/noivan0/NOVA.git
+cd NOVA
+pip install -e ".[dev]"
+python -m pytest tests/ -v   # all tests pass with no API key
+```
+
+---
+
+## Changelog
+
+See **[CHANGELOG.md](CHANGELOG.md)** for a full version history.
 
 ---
 

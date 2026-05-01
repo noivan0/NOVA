@@ -7,7 +7,7 @@ This guide walks you through your first NOVA run in 5 minutes.
 ## Prerequisites
 
 - Python 3.10 or higher
-- An API key for at least one LLM provider (or Ollama installed locally — free)
+- An API key for at least one LLM provider (or use the built-in `echo` provider — no key needed)
 
 ---
 
@@ -21,10 +21,13 @@ cd NOVA
 Choose your LLM provider:
 
 ```bash
-# OpenAI (GPT-4o, o3, o4-mini …)
+# No API key? Use the echo provider — perfect for testing harness structure
+pip install -e "."
+
+# OpenAI (gpt-4o, o3, o4-mini, gpt-5 …)
 pip install -e ".[openai]"
 
-# Anthropic Claude
+# Anthropic Claude (claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5)
 pip install -e ".[anthropic]"
 
 # Local Ollama — no API key, no cost
@@ -42,26 +45,42 @@ nova --help
 
 ---
 
-## Step 2: Configure your LLM
+## Step 2: Try it immediately — no API key needed
+
+NOVA includes an `echo` provider that mirrors your prompt back as output.
+Use it to validate harness structure, test checkpointing, and explore the
+CLI — all without touching an API.
+
+```bash
+# Set echo as your provider (no .env needed)
+NOVA_LLM_PROVIDER=echo nova run research --context topic="AI agents"
+```
+
+You'll see the full pipeline execute: phases run, quality gates fire,
+evolution log is written, output appears in `workspace/research/`.
+
+---
+
+## Step 3: Configure a real LLM
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and set your provider. Minimal configuration:
+Open `.env` and set your provider:
 
 **OpenAI:**
 ```bash
 NOVA_LLM_PROVIDER=openai
 NOVA_LLM_MODEL=gpt-4o
-NOVA_LLM_API_KEY=***
+NOVA_LLM_API_KEY=sk-...
 ```
 
 **Anthropic Claude:**
 ```bash
 NOVA_LLM_PROVIDER=anthropic
 NOVA_LLM_MODEL=claude-sonnet-4-6
-NOVA_LLM_API_KEY=***
+NOVA_LLM_API_KEY=sk-ant-...
 ```
 
 **Ollama (local, free):**
@@ -76,23 +95,23 @@ NOVA_LLM_MODEL=llama3.3
 
 ---
 
-## Step 3: Validate without API calls
+## Step 4: Dry run (preview without API calls)
 
-Before spending any tokens, validate your setup with a dry run:
+Before spending any tokens, preview what will happen:
 
 ```bash
 nova run research --context topic="artificial intelligence" --dry-run
 ```
 
-You should see the phase plan and prompt previews. No API calls are made.
+You'll see the phase plan and prompt previews — no API calls made.
 
 ---
 
-## Step 4: Run your first harness
+## Step 5: Run your first harness
 
 ### Research harness
 
-Gathers information from multiple angles and synthesises a report:
+Gathers information from multiple angles and synthesises a structured report:
 
 ```bash
 nova run research --context topic="the future of AI agents"
@@ -103,12 +122,28 @@ Output appears in `workspace/research/`:
 - `kb_context.md` — relevant prior KB context
 - `report.md` — synthesised final report
 
----
+### Summarizer harness
 
-## Step 5: Inspect results
+Multi-level summary from any text (TL;DR, key points, deep analysis):
 
 ```bash
-# See all harnesses
+nova run summarizer --context text_file=my_article.txt
+```
+
+### Data Pipeline harness
+
+Profiles a CSV file and produces an insight report:
+
+```bash
+nova run data-pipeline --context csv_file=data.csv
+```
+
+---
+
+## Step 6: Inspect results
+
+```bash
+# See all available harnesses
 nova list
 
 # Check what ran
@@ -123,9 +158,9 @@ nova kb search "AI"
 
 ---
 
-## Step 6: Resume an interrupted run
+## Step 7: Resume an interrupted run
 
-If a run is interrupted (network error, timeout, Ctrl+C), resume from the exact phase that failed:
+If a run is interrupted (network error, timeout, Ctrl+C), resume from exactly where it stopped:
 
 ```bash
 nova run research --resume
@@ -135,7 +170,7 @@ NOVA reads the checkpoint and skips phases that already completed successfully.
 
 ---
 
-## Step 7: Create your own harness
+## Step 8: Create your own harness
 
 ```bash
 nova new my-workflow --pattern pipeline
@@ -149,7 +184,7 @@ harnesses/my-workflow/
     └── step1.txt      ← edit your prompts
 ```
 
-Edit `harness.yaml` and `prompts/`, then run:
+Edit `harness.yaml` and run:
 
 ```bash
 nova run my-workflow --context key=value
@@ -162,4 +197,5 @@ nova run my-workflow --context key=value
 - [Writing Harnesses](writing-harnesses.md) — full harness authoring guide
 - [Providers](providers.md) — setup for all LLM, notifier, and publisher providers
 - [Custom Provider](custom-provider.md) — add your own LLM or publisher backend
+- [Quality Gates](quality-gates.md) — how automatic output scoring works
 - [Architecture](../architecture.md) — deep-dive into how NOVA works internally

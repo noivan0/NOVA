@@ -1,0 +1,149 @@
+name: summarizer
+description: "Long-form content summarizer — takes any text input and produces layered summaries (TL;DR, key points, deep analysis)."
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  A knowledge worker who reads long articles, papers, or documents
+  and needs multi-level summaries tailored for different audiences.
+
+phases:
+  - id: extract
+    name: "Content Extraction"
+    description: "Load and clean the input text"
+    executor: python
+    command: |
+      import pathlib, textwrap
+
+      # Accept text from context or read from file
+      text = context.get("text", "")
+      text_file = context.get("text_file", "")
+
+      if not text and text_file:
+          p = pathlib.Path(text_file)
+          if p.exists():
+              text = p.read_text(encoding="utf-8", errors="replace")
+
+      if not text:
+          # Built-in demo text
+          text = textwrap.dedent("""
+              Large language models (LLMs) have transformed the way we interact with software.
+              From code generation to scientific research, these models exhibit emergent capabilities
+              that were not explicitly programmed. However, they also present challenges: hallucinations,
+              bias, high inference costs, and difficulty in fine-grained control.
+
+              Recent advances in retrieval-augmented generation (RAG) attempt to ground LLMs in
+              verified knowledge, while techniques like constitutional AI aim to reduce harmful outputs.
+              The field is moving quickly, with new architectures such as mixture-of-experts and
+              sparse attention enabling larger effective context windows at lower cost.
+
+              Despite rapid progress, fundamental questions remain open: How do LLMs actually store
+              knowledge? Can they reason, or do they pattern-match at massive scale? And critically —
+              how do we ensure they remain aligned with human values as they grow more capable?
+          """).strip()
+
+      word_count = len(text.split())
+      output = f"Word count: {word_count}\n\n---\n\n{text}"
+    output_file: extracted.md
+    on_failure: abort
+
+  - id: tldr
+    name: "TL;DR"
+    description: "One-sentence and one-paragraph summary"
+    executor: llm
+    input_files:
+      - extracted.md
+    prompt: |
+      Summarize the following text at two levels:
+
+      TEXT:
+      {{ extracted.md }}
+
+      Provide:
+
+      **ONE SENTENCE (≤ 25 words):**
+      Write a single sentence that captures the absolute core idea.
+
+      **ONE PARAGRAPH (≤ 80 words):**
+      Write a concise paragraph covering the main points for a general audience.
+    output_file: tldr.md
+    quality_check: true
+    on_failure: retry
+
+  - id: key_points
+    name: "Key Points"
+    description: "Structured bullet-point extraction"
+    executor: llm
+    input_files:
+      - extracted.md
+    prompt: |
+      Extract the key points from this text as a structured list.
+
+      TEXT:
+      {{ extracted.md }}
+
+      Format your response as:
+
+      ## Key Points
+
+      ### Main Arguments
+      - (bullet each main argument)
+
+      ### Supporting Evidence
+      - (bullet each supporting data point or example)
+
+      ### Open Questions / Limitations
+      - (bullet unresolved issues or caveats mentioned)
+    output_file: key_points.md
+    on_failure: retry
+
+  - id: final_report
+    name: "Final Summary Report"
+    description: "Combine all layers into a structured document"
+    executor: llm
+    input_files:
+      - tldr.md
+      - key_points.md
+      - extracted.md
+    prompt: |
+      Produce a final multi-level summary document from the inputs below.
+
+      TL;DR:
+      {{ tldr.md }}
+
+      Key Points:
+      {{ key_points.md }}
+
+      Original Text:
+      {{ extracted.md }}
+
+      Create a well-structured summary with these sections:
+
+      # Summary Report
+
+      ## TL;DR
+      (paste the one-sentence summary)
+
+      ## Overview
+      (paste the one-paragraph summary)
+
+      ## Key Points
+      (paste the structured key points)
+
+      ## Deep Analysis
+      (150-200 words: your own synthesis — what's most important and why)
+
+      ## Who Should Read This
+      (one sentence: which audience benefits most)
+    output_file: summary_report.md
+    quality_check: true
+    on_failure: abort
+
+runbook:
+  - symptom: "timeout"
+    action: "notify"
+    escalate_after: 300
+
+evolution:
+  enabled: true
+  file: evolution.md

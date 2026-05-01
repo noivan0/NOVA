@@ -1,0 +1,121 @@
+name: data-pipeline
+description: "CSV data analysis pipeline — load a dataset, profile it, identify insights, and produce a structured report."
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  A data analyst who receives raw CSV data and needs a comprehensive
+  analysis report: summary statistics, key insights, anomalies, and
+  actionable recommendations.
+
+phases:
+  - id: load_profile
+    name: "Load & Profile"
+    description: "Read the CSV and compute basic statistics"
+    executor: python
+    command: |
+      import csv, io, statistics, pathlib
+
+      csv_path = pathlib.Path(context.get("csv_file", ""))
+      if not csv_path.exists():
+          # Generate sample data if no file provided
+          sample = "name,age,score,category\nAlice,29,88,A\nBob,34,72,B\nCarol,27,95,A\nDave,45,61,C\nEve,31,84,A\n"
+          csv_path = workspace / "input.csv"
+          csv_path.write_text(sample)
+          output = f"[sample data generated at {csv_path}]\n\n" + sample
+      else:
+          rows = list(csv.DictReader(csv_path.open()))
+          cols = list(rows[0].keys()) if rows else []
+          stats = {}
+          for col in cols:
+              vals = [r[col] for r in rows]
+              numeric = []
+              for v in vals:
+                  try:
+                      numeric.append(float(v))
+                  except ValueError:
+                      pass
+              if numeric:
+                  stats[col] = {
+                      "count": len(numeric),
+                      "mean": round(statistics.mean(numeric), 2),
+                      "stdev": round(statistics.stdev(numeric), 2) if len(numeric) > 1 else 0,
+                      "min": min(numeric),
+                      "max": max(numeric),
+                  }
+              else:
+                  unique = sorted(set(vals))
+                  stats[col] = {"type": "categorical", "unique": len(unique), "values": unique[:10]}
+          import json
+          output = json.dumps({"rows": len(rows), "columns": cols, "stats": stats}, indent=2)
+    output_file: profile.json
+    on_failure: abort
+
+  - id: insights
+    name: "Insight Extraction"
+    description: "Use LLM to identify key patterns and anomalies"
+    executor: llm
+    input_files:
+      - profile.json
+    prompt: |
+      You are a data analyst. Below is a statistical profile of a dataset.
+
+      Dataset Profile:
+      {{ profile.json }}
+
+      Identify:
+      1. The 3 most significant patterns or trends
+      2. Any anomalies or outliers worth noting
+      3. Potential data quality issues
+      4. 2-3 specific, actionable recommendations
+
+      Be concise and specific. Use bullet points.
+    output_file: insights.md
+    quality_check: true
+    on_failure: retry
+
+  - id: report
+    name: "Report Generation"
+    description: "Combine profile and insights into a final structured report"
+    executor: llm
+    input_files:
+      - profile.json
+      - insights.md
+    prompt: |
+      Create a professional data analysis report from the following inputs.
+
+      Profile data:
+      {{ profile.json }}
+
+      Analyst insights:
+      {{ insights.md }}
+
+      Write a report with these sections:
+      # Data Analysis Report
+
+      ## Executive Summary
+      (2-3 sentences)
+
+      ## Dataset Overview
+      (rows, columns, data types)
+
+      ## Key Findings
+      (the insights, well-formatted)
+
+      ## Recommendations
+      (prioritized action items)
+
+      ## Next Steps
+      (what analysis to do next)
+    output_file: report.md
+    quality_check: true
+    on_failure: abort
+
+runbook:
+  - symptom: "csv not found"
+    action: "notify"
+    escalate_after: 60
+
+evolution:
+  enabled: true
+  file: evolution.md
