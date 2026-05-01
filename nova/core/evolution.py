@@ -136,7 +136,7 @@ class EvolutionLog:
         )
 
         with open(self.md_path, "a") as f:
-            if not self.md_path.stat().st_size:
+            if not self.md_path.exists() or self.md_path.stat().st_size == 0:
                 f.write(f"# Evolution Log — {e['harness']}\n")
             f.write(block)
 

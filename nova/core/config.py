@@ -179,6 +179,8 @@ def _apply_env(cfg: NOVAConfig) -> None:
         cfg.llm.max_tokens = int(v)
     if v := env("NOVA_LLM_TEMPERATURE"):
         cfg.llm.temperature = float(v)
+    if v := env("NOVA_LLM_TIMEOUT"):
+        cfg.llm.timeout = int(v)
 
     # Notifier
     if v := env("NOVA_NOTIFIER_PROVIDER"):

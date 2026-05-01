@@ -141,6 +141,13 @@ def _parse_harness(raw: dict, base_dir: Path) -> HarnessDefinition:
             pf = base_dir / "prompts" / ph["prompt_file"]
             if pf.exists():
                 prompt = pf.read_text()
+            else:
+                import warnings
+                warnings.warn(
+                    f"[nova] prompt_file '{ph['prompt_file']}' not found at {pf} "
+                    f"for phase '{ph.get('id', '?')}'. Phase will use an empty prompt.",
+                    stacklevel=2,
+                )
 
         phases.append(PhaseDefinition(
             id=ph["id"],

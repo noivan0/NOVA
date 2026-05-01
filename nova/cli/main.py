@@ -28,6 +28,8 @@ def main() -> None:
         description="NOVA — AI Orchestration Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    from nova import __version__
+    parser.add_argument("--version", "-V", action="version", version=f"nova {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     # --- run ---

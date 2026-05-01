@@ -117,7 +117,11 @@ class AnthropicProvider(LLMProvider):
         except ImportError:
             raise ImportError("anthropic package required: pip install 'anthropic>=0.97'")
 
-        self.client = anthropic.Anthropic(api_key=cfg.api_key)
+        kwargs: dict = {"api_key": cfg.api_key}
+        if cfg.base_url:
+            kwargs["base_url"] = cfg.base_url
+
+        self.client = anthropic.Anthropic(**kwargs)
         self.model = cfg.model
         self.max_tokens = cfg.max_tokens
 
@@ -206,10 +210,14 @@ class OllamaProvider(LLMProvider):
 # --------------------------------------------------------------------------- #
 
 class EchoProvider(LLMProvider):
-    """Returns the prompt back. Useful for testing harnesses without API calls."""
+    """
+    Returns a predictable echo of the prompt. Useful for testing harnesses without API calls.
+    Returns the full prompt (not truncated) so integration tests can assert on content.
+    """
 
     def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
-        return f"[echo] {prompt[:200]}"
+        prefix = f"[echo/system: {system[:50]}] " if system else "[echo] "
+        return f"{prefix}{prompt}"
 
 
 # --------------------------------------------------------------------------- #

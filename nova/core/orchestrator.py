@@ -275,7 +275,12 @@ class Orchestrator:
                     context["_last_quality_score"] = result.quality_score
             else:
                 phases_failed.append(phase.id)
-                print(f"[nova] Fanout phase {phase.id} failed — continuing others")
+                if phase.on_failure == "abort":
+                    print(f"[nova] Fanout phase {phase.id} failed — aborting (on_failure=abort)")
+                    context["_fanout_results"] = fanout_results
+                    return False
+                else:
+                    print(f"[nova] Fanout phase {phase.id} failed — continuing others")
 
         context["_fanout_results"] = fanout_results
         return len(phases_failed) == 0
@@ -296,6 +301,7 @@ class Orchestrator:
 
         print(f"\n[nova] Phase: {phase.id} ({phase.executor}) timeout={timeout}s")
 
+        result: PhaseResult = PhaseResult(phase.id, False, error="No attempts made")
         for attempt in range(max_retries + 1):
             if attempt > 0:
                 print(f"[nova]   retry {attempt}/{max_retries}")
@@ -306,7 +312,7 @@ class Orchestrator:
                 elif phase.executor == "shell":
                     result = self._exec_shell(phase, workspace, context, timeout)
                 elif phase.executor == "python":
-                    result = self._exec_python(phase, workspace, context)
+                    result = self._exec_python(phase, workspace, context, timeout)
                 elif phase.executor == "passthrough":
                     result = PhaseResult(phase.id, True, output="")
                 else:
@@ -332,7 +338,7 @@ class Orchestrator:
             if attempt >= max_retries:
                 break
 
-        return result  # type: ignore
+        return result
 
     def _exec_llm(
         self,
@@ -347,16 +353,25 @@ class Orchestrator:
         for k, v in context.items():
             prompt = prompt.replace(f"{{{{{k}}}}}", str(v))
 
-        # Inject input file contents
+        # Inject input file contents — both appended AND available as {{ filename }} template vars
         inputs = {}
         for fname in phase.input_files:
             fpath = workspace / fname
             if fpath.exists():
                 inputs[fname] = fpath.read_text()
 
-        if inputs:
+        # Template substitution for {{ filename }} in prompt
+        for fname, content in inputs.items():
+            prompt = prompt.replace(f"{{{{{fname}}}}}", content)
+
+        # Append any remaining input files not already substituted
+        unsubstituted = {
+            fn: ct for fn, ct in inputs.items()
+            if f"{{{{{fn}}}}}" not in phase.prompt  # already handled above
+        }
+        if unsubstituted:
             files_block = "\n\n".join(
-                f"=== {fn} ===\n{content}" for fn, content in inputs.items()
+                f"=== {fn} ===\n{content}" for fn, content in unsubstituted.items()
             )
             prompt = f"{prompt}\n\n{files_block}"
 
@@ -364,11 +379,11 @@ class Orchestrator:
             print(f"[nova][dry-run] LLM prompt ({len(prompt)} chars)")
             return PhaseResult(phase.id, True, output=f"[dry-run] phase={phase.id}")
 
-        # FIX H2: pass harness persona as system prompt
+        # Pass harness persona as system prompt
         system = harness.persona or ""
         output = self.llm.complete(prompt, system=system, timeout=timeout)
 
-        # FIX C2: parse quality score from LLM output when quality_check is set
+        # Parse quality score from LLM output when quality_check is set
         quality_score: Optional[int] = None
         if phase.quality_check:
             quality_score = _parse_quality_score(output)
@@ -406,15 +421,33 @@ class Orchestrator:
         phase: PhaseDefinition,
         workspace: Path,
         context: Dict[str, Any],
+        timeout: int = 120,
     ) -> PhaseResult:
         """Execute inline Python code defined in phase.command."""
+        import signal
+
         local_vars: Dict[str, Any] = {"workspace": workspace, "context": context, "output": ""}
+
+        def _timeout_handler(signum: int, frame: object) -> None:
+            raise TimeoutError(f"Python phase '{phase.id}' timed out after {timeout}s")
+
+        old_handler = None
+        use_signal = hasattr(signal, "SIGALRM")  # SIGALRM not available on Windows
         try:
-            # FIX C1: pass __builtins__ so imports inside the snippet work
+            if use_signal:
+                old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                signal.alarm(timeout)
             exec(phase.command, {"__builtins__": __builtins__}, local_vars)  # noqa: S102
             return PhaseResult(phase.id, True, output=str(local_vars.get("output", "")))
+        except TimeoutError as e:
+            return PhaseResult(phase.id, False, error=str(e))
         except Exception as e:
             return PhaseResult(phase.id, False, error=str(e))
+        finally:
+            if use_signal:
+                signal.alarm(0)
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
 
     # ------------------------------------------------------------------ #
     # Failure handling
