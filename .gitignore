@@ -1,6 +1,8 @@
 .env
 workspace/
 output/
+.nova-arch/
+graphify-out/
 *.pyc
 __pycache__/
 .pytest_cache/

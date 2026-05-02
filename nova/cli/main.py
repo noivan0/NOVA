@@ -18,6 +18,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -70,6 +71,29 @@ def main() -> None:
     kb_list = kb_sub.add_parser("list", help="List KB pages")
     kb_list.add_argument("--prefix", default="", help="Filter by prefix")
 
+    # --- inspect ---
+    inspect_p = sub.add_parser("inspect", help="Native architecture intelligence")
+    inspect_sub = inspect_p.add_subparsers(dest="inspect_command", required=True)
+
+    inspect_build = inspect_sub.add_parser("build", help="Build architecture graph")
+    inspect_build.add_argument("repo", nargs="?", default=".", help="Repository root")
+
+    inspect_report = inspect_sub.add_parser("report", help="Generate markdown architecture report")
+    inspect_report.add_argument("repo", nargs="?", default=".", help="Repository root")
+
+    inspect_hotspots = inspect_sub.add_parser("hotspots", help="Show structural hotspots")
+    inspect_hotspots.add_argument("repo", nargs="?", default=".", help="Repository root")
+    inspect_hotspots.add_argument("--limit", type=int, default=10, help="Number of results")
+
+    inspect_bridges = inspect_sub.add_parser("bridges", help="Show bridge nodes")
+    inspect_bridges.add_argument("repo", nargs="?", default=".", help="Repository root")
+    inspect_bridges.add_argument("--limit", type=int, default=10, help="Number of results")
+
+    inspect_path = inspect_sub.add_parser("path", help="Find path between two nodes")
+    inspect_path.add_argument("repo", nargs="?", default=".", help="Repository root")
+    inspect_path.add_argument("--from", dest="source", required=True, help="Source node query")
+    inspect_path.add_argument("--to", dest="target", required=True, help="Target node query")
+
     # --- new ---
     new_p = sub.add_parser("new", help="Scaffold a new harness")
     new_p.add_argument("name", help="Harness name (lowercase-hyphenated)")
@@ -87,6 +111,7 @@ def main() -> None:
     from nova.core.evolution import EvolutionLog
     from nova.core.kb import KB
     from nova.core.orchestrator import Orchestrator
+    from nova.inspect import ArchitectureAnalyzer, render_markdown_report
 
     # ------------------------------------------------------------------ #
     # run
@@ -199,6 +224,52 @@ def main() -> None:
             pages = kb.list_pages(prefix=args.prefix)
             for p in pages:
                 print(f"  {p}")
+
+    # ------------------------------------------------------------------ #
+    # inspect
+    # ------------------------------------------------------------------ #
+    elif args.command == "inspect":
+        analyzer = ArchitectureAnalyzer(args.repo)
+
+        if args.inspect_command == "build":
+            graph = analyzer.build()
+            graph_path = analyzer.save(graph)
+            print(f"Built architecture graph: {graph_path}")
+            print(json.dumps(graph.summary, indent=2))
+
+        elif args.inspect_command == "report":
+            graph = analyzer.build()
+            analyzer.save(graph)
+            hotspots = analyzer.top_hotspots(graph)
+            bridges = analyzer.top_bridges(graph)
+            sample_paths = [
+                analyzer.find_path(graph, "main", "Orchestrator"),
+                analyzer.find_path(graph, "Orchestrator", "Checkpoint"),
+                analyzer.find_path(graph, "Orchestrator", "KB"),
+            ]
+            report = render_markdown_report(graph, hotspots, bridges, sample_paths)
+            report_path = analyzer.output_dir / "report.md"
+            report_path.write_text(report)
+            print(f"Wrote report: {report_path}")
+
+        elif args.inspect_command == "hotspots":
+            graph = analyzer.build()
+            for node in analyzer.top_hotspots(graph, args.limit):
+                print(f"{node.id}\tdegree={node.degree_total}\tlayer={node.layer}\tfile={node.file_path}")
+
+        elif args.inspect_command == "bridges":
+            graph = analyzer.build()
+            for node in analyzer.top_bridges(graph, args.limit):
+                print(f"{node.id}\tbridge={node.bridge_score}\tdegree={node.degree_total}\tlayer={node.layer}")
+
+        elif args.inspect_command == "path":
+            graph = analyzer.build()
+            result = analyzer.find_path(graph, args.source, args.target)
+            if result.found:
+                print(" -> ".join(result.path))
+            else:
+                print(f"No path found from {args.source} to {args.target}")
+                sys.exit(1)
 
     # ------------------------------------------------------------------ #
     # new

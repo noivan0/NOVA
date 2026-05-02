@@ -61,6 +61,7 @@ That one command: searches from multiple angles → synthesises findings → run
 - **RunBook** — declarative failure recovery: `rate limit → wait 60s → retry`, `timeout → notify`
 - **Evolution Log** — per-harness run history in Markdown + JSONL; track quality score trends
 - **Knowledge Base (KB)** — persistent markdown store across runs; inject prior context into prompts
+- **Native architecture intelligence** — build a local structural graph, inspect hotspots, bridges, and execution paths without external graph tooling
 - **Zero infrastructure** — no databases, no message queues, no Docker required; pure Python + YAML
 - **Minimal dependencies** — core requires only `pyyaml`; LLM SDKs are optional extras
 
@@ -180,7 +181,19 @@ nova kb search "AI agents"         # Full-text search your persistent KB
 nova kb list                       # All KB pages
 ```
 
-### 5. Scaffold a new harness
+### 5. Inspect architecture
+
+```bash
+nova inspect build .
+nova inspect hotspots .
+nova inspect bridges .
+nova inspect path . --from main --to Orchestrator
+nova inspect report .
+```
+
+Artifacts are written to `.nova-arch/` (`graph.json`, `summary.json`, `report.md`).
+
+### 6. Scaffold a new harness
 
 ```bash
 nova new my-workflow --pattern pipeline
