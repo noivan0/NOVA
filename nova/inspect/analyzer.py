@@ -124,11 +124,21 @@ class ArchitectureAnalyzer:
         payload = json.loads(graph_path.read_text())
         return AnalysisGraph.from_dict(payload)
 
-    def find_path(self, graph: AnalysisGraph, source_query: str, target_query: str) -> PathQueryResult:
+    def find_path(
+        self,
+        graph: AnalysisGraph,
+        source_query: str,
+        target_query: str,
+    ) -> PathQueryResult:
         source = self._find_node_id(graph, source_query)
         target = self._find_node_id(graph, target_query)
         if not source or not target:
-            return PathQueryResult(source=source_query, target=target_query, path=[], found=False)
+            return PathQueryResult(
+                source=source_query,
+                target=target_query,
+                path=[],
+                found=False,
+            )
 
         adjacency: Dict[str, List[str]] = defaultdict(list)
         for edge in graph.edges:
@@ -253,8 +263,17 @@ class ArchitectureAnalyzer:
             "kinds": Counter(n.kind for n in enriched),
             "layers": Counter(n.layer for n in enriched),
             "edge_kinds": Counter(e.kind for e in dedup),
-            "top_hotspots": [n.id for n in sorted(enriched, key=lambda n: (-n.degree_total, n.id))[:10]],
-            "top_bridges": [n.id for n in sorted(enriched, key=lambda n: (-n.bridge_score, -n.degree_total, n.id))[:10]],
+            "top_hotspots": [
+                n.id
+                for n in sorted(enriched, key=lambda n: (-n.degree_total, n.id))[:10]
+            ],
+            "top_bridges": [
+                n.id
+                for n in sorted(
+                    enriched,
+                    key=lambda n: (-n.bridge_score, -n.degree_total, n.id),
+                )[:10]
+            ],
         }
         return AnalysisGraph(
             repo_root=str(self.repo_root),
@@ -266,10 +285,20 @@ class ArchitectureAnalyzer:
 
     def _find_node_id(self, graph: AnalysisGraph, query: str) -> Optional[str]:
         lowered = query.lower()
-        exact = [n.id for n in graph.nodes if n.id.lower() == lowered or n.qualname.lower() == lowered or n.name.lower() == lowered]
+        exact = [
+            n.id
+            for n in graph.nodes
+            if n.id.lower() == lowered
+            or n.qualname.lower() == lowered
+            or n.name.lower() == lowered
+        ]
         if exact:
             return exact[0]
-        partial = [n.id for n in graph.nodes if lowered in n.id.lower() or lowered in n.qualname.lower()]
+        partial = [
+            n.id
+            for n in graph.nodes
+            if lowered in n.id.lower() or lowered in n.qualname.lower()
+        ]
         if partial:
             return sorted(partial)[0]
         return None

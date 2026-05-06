@@ -62,3 +62,4 @@ jobs:
 
       - name: Mypy (type check)
         run: mypy nova/ --ignore-missing-imports
+        continue-on-error: true

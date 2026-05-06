@@ -30,13 +30,15 @@ def render_markdown_report(
     ]
     for idx, node in enumerate(hotspots, start=1):
         lines.append(
-            f"{idx}. `{node.id}` — degree={node.degree_total} in={node.degree_in} out={node.degree_out} layer={node.layer}"
+            f"{idx}. `{node.id}` — degree={node.degree_total} "
+            f"in={node.degree_in} out={node.degree_out} layer={node.layer}"
         )
 
     lines.extend(["", "## Top Bridges", ""])
     for idx, node in enumerate(bridges, start=1):
         lines.append(
-            f"{idx}. `{node.id}` — bridge_score={node.bridge_score} degree={node.degree_total} layer={node.layer}"
+            f"{idx}. `{node.id}` — bridge_score={node.bridge_score} "
+            f"degree={node.degree_total} layer={node.layer}"
         )
 
     lines.extend(["", "## Sample Paths", ""])

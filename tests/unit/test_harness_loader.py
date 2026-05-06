@@ -1,8 +1,8 @@
 """tests/unit/test_harness_loader.py — Unit tests for HarnessLoader."""
 import tempfile
 from pathlib import Path
-from nova.core.harness import HarnessLoader
 
+from nova.core.harness import HarnessLoader
 
 SAMPLE_HARNESS = """\
 name: test-harness

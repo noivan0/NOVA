@@ -193,8 +193,13 @@ class Orchestrator:
             # Serialize only string/primitive context values to checkpoint
             # (objects like _publisher are non-serializable and rebuilt at startup)
             serializable_ctx = {
-                k: v for k, v in context.items()
-                if not k.startswith("_") and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+                k: v
+                for k, v in context.items()
+                if not k.startswith("_")
+                and isinstance(
+                    v,
+                    (str, int, float, bool, list, dict, type(None)),
+                )
             }
             checkpoint.update(i, phase.id, {"context": serializable_ctx})
             result = self._execute_phase(phase, workspace, context, harness)
@@ -258,8 +263,13 @@ class Orchestrator:
 
             # Serialize only primitive context values to checkpoint
             serializable_ctx = {
-                k: v for k, v in context.items()
-                if not k.startswith("_") and isinstance(v, (str, int, float, bool, list, dict, type(None)))
+                k: v
+                for k, v in context.items()
+                if not k.startswith("_")
+                and isinstance(
+                    v,
+                    (str, int, float, bool, list, dict, type(None)),
+                )
             }
             checkpoint.update(i, phase.id, {"context": serializable_ctx})
             result = self._execute_phase(phase, workspace, context, harness)
@@ -316,7 +326,11 @@ class Orchestrator:
                 elif phase.executor == "passthrough":
                     result = PhaseResult(phase.id, True, output="")
                 else:
-                    result = PhaseResult(phase.id, False, error=f"Unknown executor: {phase.executor}")
+                    result = PhaseResult(
+                        phase.id,
+                        False,
+                        error=f"Unknown executor: {phase.executor}",
+                    )
 
                 if result.success:
                     # Optional quality gate

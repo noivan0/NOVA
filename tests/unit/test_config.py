@@ -1,10 +1,8 @@
 """tests/unit/test_config.py — Unit tests for config loading."""
 import os
 import tempfile
-from pathlib import Path
 
-from nova.core.config import load_config, NOVAConfig
-
+from nova.core.config import NOVAConfig, load_config
 
 SAMPLE_YAML = """\
 workspace: ./my-workspace
@@ -98,7 +96,14 @@ def test_env_overrides_yaml():
 
 
 def test_dry_run_env_variants():
-    for val, expected in [("true", True), ("1", True), ("yes", True), ("false", False), ("0", False)]:
+    cases = [
+        ("true", True),
+        ("1", True),
+        ("yes", True),
+        ("false", False),
+        ("0", False),
+    ]
+    for val, expected in cases:
         old = os.environ.get("NOVA_DRY_RUN")
         os.environ["NOVA_DRY_RUN"] = val
         try:

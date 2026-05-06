@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from nova.core.config import LLMConfig
 
@@ -64,7 +63,7 @@ class OpenAIProvider(LLMProvider):
         except ImportError:
             raise ImportError("openai package required: pip install 'openai>=2.0'")
 
-        kwargs = {"api_key": cfg.api_key or "***"}
+        kwargs: dict[str, object] = {"api_key": cfg.api_key or "***"}
         if cfg.base_url:
             kwargs["base_url"] = cfg.base_url
 

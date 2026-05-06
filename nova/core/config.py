@@ -125,14 +125,14 @@ def _apply_yaml(cfg: NOVAConfig, raw: dict) -> None:
         cfg.kb.embedding_enabled = kb.get("embedding_enabled", cfg.kb.embedding_enabled)
 
     if "llm" in raw:
-        l = raw["llm"]
-        cfg.llm.provider = l.get("provider", cfg.llm.provider)
-        cfg.llm.model = l.get("model", cfg.llm.model)
-        cfg.llm.api_key = l.get("api_key", cfg.llm.api_key)
-        cfg.llm.base_url = l.get("base_url", cfg.llm.base_url)
-        cfg.llm.max_tokens = int(l.get("max_tokens", cfg.llm.max_tokens))
-        cfg.llm.temperature = float(l.get("temperature", cfg.llm.temperature))
-        cfg.llm.timeout = int(l.get("timeout", cfg.llm.timeout))
+        llm_cfg = raw["llm"]
+        cfg.llm.provider = llm_cfg.get("provider", cfg.llm.provider)
+        cfg.llm.model = llm_cfg.get("model", cfg.llm.model)
+        cfg.llm.api_key = llm_cfg.get("api_key", cfg.llm.api_key)
+        cfg.llm.base_url = llm_cfg.get("base_url", cfg.llm.base_url)
+        cfg.llm.max_tokens = int(llm_cfg.get("max_tokens", cfg.llm.max_tokens))
+        cfg.llm.temperature = float(llm_cfg.get("temperature", cfg.llm.temperature))
+        cfg.llm.timeout = int(llm_cfg.get("timeout", cfg.llm.timeout))
 
     if "notifier" in raw:
         n = raw["notifier"]

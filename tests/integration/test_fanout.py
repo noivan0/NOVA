@@ -2,10 +2,9 @@
 import tempfile
 from pathlib import Path
 
-from nova.core.config import NOVAConfig, LLMConfig, NotifierConfig, PublisherConfig, KBConfig
+from nova.core.config import KBConfig, LLMConfig, NotifierConfig, NOVAConfig, PublisherConfig
 from nova.core.harness import HarnessLoader
 from nova.core.orchestrator import Orchestrator
-
 
 FANOUT_YAML = """\
 name: fanout-test
@@ -111,5 +110,4 @@ def test_fanout_abort_on_failure():
 
         assert ok is False
         # never_reached phase should not have run — no output file
-        ws = Path(cfg.workspace) / "fanout-abort"
         # (there's no output_file on never_reached, so just assert run returned False)

@@ -1,5 +1,4 @@
 """tests/unit/test_quality_gate.py — Quality gate and score parsing tests."""
-import re
 
 from nova.core.orchestrator import _parse_quality_score
 

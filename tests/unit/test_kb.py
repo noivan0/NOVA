@@ -1,6 +1,6 @@
 """tests/unit/test_kb.py — Unit tests for the Knowledge Base."""
 import tempfile
-from pathlib import Path
+
 from nova.core.kb import KB
 
 

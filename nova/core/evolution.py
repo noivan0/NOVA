@@ -90,7 +90,7 @@ class EvolutionLog:
         if not self.jsonl_path.exists():
             return []
         lines = self.jsonl_path.read_text().strip().splitlines()
-        entries = [json.loads(l) for l in lines if l.strip()]
+        entries = [json.loads(line) for line in lines if line.strip()]
         return entries[-n:]
 
     def failure_rate(self, last_n: int = 10) -> float:
@@ -118,9 +118,21 @@ class EvolutionLog:
 
     def _append_markdown(self, e: dict) -> None:
         status = "SUCCESS" if e["success"] else "FAILURE"
-        score_line = f"- quality_score: {e['quality_score']}\n" if e["quality_score"] is not None else ""
-        failed_line = f"- phases_failed: {', '.join(e['phases_failed'])}\n" if e["phases_failed"] else ""
-        runbook_line = f"- runbook_fired: {', '.join(e['runbook_fired'])}\n" if e["runbook_fired"] else ""
+        score_line = (
+            f"- quality_score: {e['quality_score']}\n"
+            if e["quality_score"] is not None
+            else ""
+        )
+        failed_line = (
+            f"- phases_failed: {', '.join(e['phases_failed'])}\n"
+            if e["phases_failed"]
+            else ""
+        )
+        runbook_line = (
+            f"- runbook_fired: {', '.join(e['runbook_fired'])}\n"
+            if e["runbook_fired"]
+            else ""
+        )
         improvement_line = (
             "- improvements:\n" + "".join(f"  - {i}\n" for i in e["improvements"])
             if e["improvements"] else ""

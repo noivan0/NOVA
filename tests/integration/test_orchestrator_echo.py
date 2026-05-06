@@ -3,10 +3,10 @@ Integration test using the Echo LLM provider (no API key needed).
 """
 import tempfile
 from pathlib import Path
-from nova.core.config import NOVAConfig, LLMConfig, NotifierConfig, PublisherConfig, KBConfig
+
+from nova.core.config import KBConfig, LLMConfig, NotifierConfig, NOVAConfig, PublisherConfig
 from nova.core.harness import HarnessLoader
 from nova.core.orchestrator import Orchestrator
-
 
 HARNESS_YAML = """\
 name: echo-test

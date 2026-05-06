@@ -1,5 +1,6 @@
 """tests/unit/test_checkpoint.py — Unit tests for Checkpoint."""
-import tempfile, time
+import tempfile
+
 from nova.core.checkpoint import Checkpoint
 
 

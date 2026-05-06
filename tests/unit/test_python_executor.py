@@ -2,7 +2,7 @@
 import tempfile
 from pathlib import Path
 
-from nova.core.config import NOVAConfig, LLMConfig, NotifierConfig, PublisherConfig, KBConfig
+from nova.core.config import KBConfig, LLMConfig, NotifierConfig, NOVAConfig, PublisherConfig
 from nova.core.harness import HarnessDefinition, PhaseDefinition
 from nova.core.orchestrator import Orchestrator
 
