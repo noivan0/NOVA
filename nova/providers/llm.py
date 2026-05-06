@@ -63,11 +63,11 @@ class OpenAIProvider(LLMProvider):
         except ImportError:
             raise ImportError("openai package required: pip install 'openai>=2.0'")
 
-        kwargs: dict[str, object] = {"api_key": cfg.api_key or "***"}
+        api_key = cfg.api_key or "***"
         if cfg.base_url:
-            kwargs["base_url"] = cfg.base_url
-
-        self.client = OpenAI(**kwargs)
+            self.client = OpenAI(api_key=api_key, base_url=cfg.base_url)
+        else:
+            self.client = OpenAI(api_key=api_key)
         self.model = cfg.model
         self.max_tokens = cfg.max_tokens
         self.temperature = cfg.temperature

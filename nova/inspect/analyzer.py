@@ -6,9 +6,26 @@ from collections import Counter, defaultdict, deque
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple, TypedDict
 
 from .models import AnalysisGraph, EdgeRecord, NodeRecord, PathQueryResult
+
+
+class ClassRecord(TypedDict):
+    name: str
+    qualname: str
+    lineno: int
+    end_lineno: int
+    bases: List[str]
+
+
+class FunctionRecord(TypedDict):
+    name: str
+    qualname: str
+    lineno: int
+    end_lineno: int
+    calls: List[str]
+    parent_class: Optional[str]
 
 
 class ArchitectureAnalyzer:
@@ -51,43 +68,48 @@ class ArchitectureAnalyzer:
 
             for cls in module_visitor.classes:
                 class_id = f"class:{cls['qualname']}"
-                nodes.append(NodeRecord(
-                    id=class_id,
-                    kind="class",
-                    name=cls["name"],
-                    qualname=cls["qualname"],
-                    file_path=self._rel(path),
-                    lineno=cls["lineno"],
-                    end_lineno=cls["end_lineno"],
-                    module=module_name,
-                    layer=layer,
-                ))
-                symbol_index[cls["qualname"]] = class_id
-                symbol_index[cls["name"]] = class_id
+                nodes.append(
+                    NodeRecord(
+                        id=class_id,
+                        kind="class",
+                        name=cls['name'],
+                        qualname=cls['qualname'],
+                        file_path=self._rel(path),
+                        lineno=cls['lineno'],
+                        end_lineno=cls['end_lineno'],
+                        module=module_name,
+                        layer=layer,
+                    )
+                )
+                symbol_index[cls['qualname']] = class_id
+                symbol_index[cls['name']] = class_id
                 edges.append(EdgeRecord(source=module_id, target=class_id, kind="contains"))
-                for base in cls["bases"]:
+                for base in cls['bases']:
                     pending_inherit_edges.append((class_id, base))
 
             for fn in module_visitor.functions:
                 fn_id = f"function:{fn['qualname']}"
-                nodes.append(NodeRecord(
-                    id=fn_id,
-                    kind="function",
-                    name=fn["name"],
-                    qualname=fn["qualname"],
-                    file_path=self._rel(path),
-                    lineno=fn["lineno"],
-                    end_lineno=fn["end_lineno"],
-                    module=module_name,
-                    layer=layer,
-                ))
-                symbol_index[fn["qualname"]] = fn_id
-                symbol_index[fn["name"]] = fn_id
+                nodes.append(
+                    NodeRecord(
+                        id=fn_id,
+                        kind="function",
+                        name=fn['name'],
+                        qualname=fn['qualname'],
+                        file_path=self._rel(path),
+                        lineno=fn['lineno'],
+                        end_lineno=fn['end_lineno'],
+                        module=module_name,
+                        layer=layer,
+                    )
+                )
+                symbol_index[fn['qualname']] = fn_id
+                symbol_index[fn['name']] = fn_id
                 parent_id = module_id
-                if fn.get("parent_class"):
-                    parent_id = symbol_index.get(f"{module_name}.{fn['parent_class']}", module_id)
+                parent_class = fn['parent_class']
+                if parent_class:
+                    parent_id = symbol_index.get(f"{module_name}.{parent_class}", module_id)
                 edges.append(EdgeRecord(source=parent_id, target=fn_id, kind="contains"))
-                for called in fn["calls"]:
+                for called in fn['calls']:
                     pending_call_edges.append((fn_id, called))
 
             for imported in module_visitor.imports:
@@ -140,11 +162,11 @@ class ArchitectureAnalyzer:
                 found=False,
             )
 
-        adjacency: Dict[str, List[str]] = defaultdict(list)
+        adjacency: DefaultDict[str, List[str]] = defaultdict(list)
         for edge in graph.edges:
             adjacency[edge.source].append(edge.target)
 
-        queue = deque([[source]])
+        queue: deque[List[str]] = deque([[source]])
         seen = {source}
         while queue:
             path = queue.popleft()
@@ -222,14 +244,14 @@ class ArchitectureAnalyzer:
         return None
 
     def _enrich(self, nodes: List[NodeRecord], edges: List[EdgeRecord]) -> AnalysisGraph:
-        indeg = Counter()
-        outdeg = Counter()
+        indeg: Counter[str] = Counter()
+        outdeg: Counter[str] = Counter()
         neighbors: Dict[str, Set[str]] = defaultdict(set)
         cross_module_neighbors: Dict[str, Set[str]] = defaultdict(set)
-        node_map = {n.id: n for n in nodes}
+        node_map: Dict[str, NodeRecord] = {n.id: n for n in nodes}
 
-        dedup = []
-        seen_edges = set()
+        dedup: List[EdgeRecord] = []
+        seen_edges: Set[Tuple[str, str, str]] = set()
         for edge in edges:
             key = (edge.source, edge.target, edge.kind)
             if edge.source == edge.target or key in seen_edges:
@@ -240,13 +262,15 @@ class ArchitectureAnalyzer:
             outdeg[edge.source] += 1
             neighbors[edge.source].add(edge.target)
             neighbors[edge.target].add(edge.source)
-            src_mod = node_map.get(edge.source).module if node_map.get(edge.source) else ""
-            tgt_mod = node_map.get(edge.target).module if node_map.get(edge.target) else ""
+            src_node = node_map.get(edge.source)
+            tgt_node = node_map.get(edge.target)
+            src_mod = src_node.module if src_node else ""
+            tgt_mod = tgt_node.module if tgt_node else ""
             if src_mod and tgt_mod and src_mod != tgt_mod:
                 cross_module_neighbors[edge.source].add(tgt_mod)
                 cross_module_neighbors[edge.target].add(src_mod)
 
-        enriched = []
+        enriched: List[NodeRecord] = []
         for node in nodes:
             new_node = replace(
                 node,
@@ -307,8 +331,8 @@ class ArchitectureAnalyzer:
 class _ModuleVisitor(ast.NodeVisitor):
     def __init__(self, module_name: str):
         self.module_name = module_name
-        self.classes: List[Dict[str, object]] = []
-        self.functions: List[Dict[str, object]] = []
+        self.classes: List[ClassRecord] = []
+        self.functions: List[FunctionRecord] = []
         self.imports: List[str] = []
         self._class_stack: List[str] = []
 
@@ -322,14 +346,16 @@ class _ModuleVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         qualname = f"{self.module_name}.{node.name}"
-        bases = [_expr_name(base) for base in node.bases if _expr_name(base)]
-        self.classes.append({
-            "name": node.name,
-            "qualname": qualname,
-            "lineno": node.lineno,
-            "end_lineno": getattr(node, "end_lineno", node.lineno),
-            "bases": bases,
-        })
+        bases = [name for base in node.bases if (name := _expr_name(base)) is not None]
+        self.classes.append(
+            ClassRecord(
+                name=node.name,
+                qualname=qualname,
+                lineno=node.lineno,
+                end_lineno=getattr(node, "end_lineno", node.lineno),
+                bases=bases,
+            )
+        )
         self._class_stack.append(node.name)
         self.generic_visit(node)
         self._class_stack.pop()
@@ -340,25 +366,30 @@ class _ModuleVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._record_function(node)
 
-    def _record_function(self, node: ast.AST) -> None:
+    def _record_function(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
         name = node.name
         parent_class = self._class_stack[-1] if self._class_stack else None
         qualname = f"{self.module_name}.{name}"
         if parent_class:
             qualname = f"{self.module_name}.{parent_class}.{name}"
-        self.functions.append({
-            "name": name,
-            "qualname": qualname,
-            "lineno": node.lineno,
-            "end_lineno": getattr(node, "end_lineno", node.lineno),
-            "calls": _collect_calls(node),
-            "parent_class": parent_class,
-        })
+        self.functions.append(
+            FunctionRecord(
+                name=name,
+                qualname=qualname,
+                lineno=node.lineno,
+                end_lineno=getattr(node, "end_lineno", node.lineno),
+                calls=_collect_calls(node),
+                parent_class=parent_class,
+            )
+        )
         self.generic_visit(node)
 
 
 def _collect_calls(node: ast.AST) -> List[str]:
-    calls = []
+    calls: List[str] = []
     for child in ast.walk(node):
         if isinstance(child, ast.Call):
             called = _expr_name(child.func)
