@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nova-orchestrator"
-version = "1.0.0"
+version = "1.2.0"
 description = "NOVA — Noivan Orchestrated Vanguard Architecture: Single-agent AI orchestration framework"
 readme = "README.md"
 license = "MIT"

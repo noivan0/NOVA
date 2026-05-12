@@ -6,6 +6,19 @@ NOVA uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.0] — 2026-05-12
+
+### Added
+- `nova/kb/` — Agent KB Pattern module: persistent, compounding knowledge base for autonomous agents
+  - `KBManager` — read/write KB pages with YAML frontmatter validation
+  - `KBSync` — incremental embedding sync into SQLite (hash-based, no redundant re-embeds)
+  - `KBSearch` — hybrid BM25 keyword + cosine vector search, no external vector DB required
+  - Pluggable embedding backends: OpenAI, sentence-transformers, Ollama, or no-op (keyword only)
+  - Multi-namespace search (main KB + project KB + sessions in one query)
+  - Chunking by H2 sections for precise retrieval
+- `examples/kb_quickstart.py` — self-contained example (runs with no API key)
+- Pattern canonical doc: [Agent KB Pattern Gist](https://gist.github.com/noivan0/agent-kb-pattern)
+
 ## [1.1.0] — 2026-05-01
 
 ### Added
