@@ -17,7 +17,7 @@ NOVA uses [Semantic Versioning](https://semver.org/).
   - Multi-namespace search (main KB + project KB + sessions in one query)
   - Chunking by H2 sections for precise retrieval
 - `examples/kb_quickstart.py` — self-contained example (runs with no API key)
-- Pattern canonical doc: [Agent KB Pattern Gist](https://gist.github.com/noivan0/agent-kb-pattern)
+- Pattern canonical doc: [Agent KB Pattern Gist](https://gist.github.com/noivan0/2c1129a2b8d829be70cab1439d4c6e18)
 
 ## [1.1.0] — 2026-05-01
 

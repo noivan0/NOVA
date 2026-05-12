@@ -4,6 +4,9 @@ nova.kb.sync — Incremental embedding sync for KB pages.
 Indexes KB markdown files into SQLite (embeddings.db).
 Only re-embeds pages whose content has changed (content_hash check).
 
+Implements the Agent KB Pattern:
+  https://gist.github.com/noivan0/2c1129a2b8d829be70cab1439d4c6e18
+
 Supports pluggable embedding backends:
   - OpenAI / any OpenAI-compatible endpoint
   - sentence-transformers (local)

@@ -2,7 +2,7 @@
 nova.kb.manager — KB page read/write with frontmatter validation.
 
 Follows the Agent KB Pattern:
-  https://gist.github.com/noivan0/agent-kb-pattern
+  https://gist.github.com/noivan0/2c1129a2b8d829be70cab1439d4c6e18
 """
 
 from __future__ import annotations

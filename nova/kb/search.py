@@ -4,6 +4,9 @@ nova.kb.search — Hybrid BM25 + cosine search across KB namespaces.
 No external vector DB required — runs entirely on SQLite.
 Supports multi-namespace search (KB + sessions + skills + project-specific KBs).
 
+Implements the Agent KB Pattern:
+  https://gist.github.com/noivan0/2c1129a2b8d829be70cab1439d4c6e18
+
 Usage::
 
     from nova.kb.search import KBSearch
