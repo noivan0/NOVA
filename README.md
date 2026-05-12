@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
   <img src="https://github.com/noivan0/NOVA/actions/workflows/ci.yml/badge.svg" alt="CI"/>
-  <img src="https://img.shields.io/badge/tests-14%20passing-brightgreen?style=flat-square" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-37%20passing-brightgreen?style=flat-square" alt="Tests"/>
   <img src="https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic%20%7C%20Ollama-orange?style=flat-square" alt="LLM Providers"/>
 </p>
 
@@ -60,7 +60,7 @@ That one command: searches from multiple angles → synthesises findings → run
 - **Quality Gate** — LLM outputs a score; NOVA retries automatically if below your threshold
 - **RunBook** — declarative failure recovery: `rate limit → wait 60s → retry`, `timeout → notify`
 - **Evolution Log** — per-harness run history in Markdown + JSONL; track quality score trends
-- **Knowledge Base (KB)** — persistent markdown store across runs; inject prior context into prompts
+- **Knowledge Base (KB)** — persistent markdown store across runs; inject prior context into prompts. Full Agent KB Pattern module (`nova/kb/`) with hybrid BM25 + vector search, pluggable embedding backends, and incremental SQLite sync
 - **Native architecture intelligence** — build a local structural graph, inspect hotspots, bridges, and execution paths without external graph tooling
 - **Zero infrastructure** — no databases, no message queues, no Docker required; pure Python + YAML
 - **Minimal dependencies** — core requires only `pyyaml`; LLM SDKs are optional extras
@@ -137,11 +137,14 @@ That one command: searches from multiple angles → synthesises findings → run
 git clone https://github.com/noivan0/NOVA.git
 cd NOVA
 
-# Pick your LLM provider:
-pip install -e ".[openai]"      # OpenAI (GPT-4o, GPT-4.1, o3, o4-mini …)
-pip install -e ".[anthropic]"   # Anthropic Claude
-pip install -e ".[ollama]"      # Local Ollama — no API key needed
-pip install -e ".[all]"         # All providers at once
+# Preferred release-safe installs:
+pip install ".[openai]"      # OpenAI (GPT-4o, GPT-4.1, o3, o4-mini …)
+pip install ".[anthropic]"   # Anthropic Claude
+pip install ".[ollama]"      # Local Ollama — no API key needed
+pip install ".[all]"         # All providers at once
+
+# Editable install is intended for development only:
+# pip install -e ".[openai]"
 ```
 
 ### 2. Set your API key
@@ -522,6 +525,74 @@ Use the following prior research when writing this report:
 
 ---
 
+## Agent KB Pattern (`nova/kb/`) — v1.2.0
+
+For agents that run continuously across many sessions, NOVA includes a full implementation of the
+[Agent KB Pattern](https://gist.github.com/noivan0/2c1129a2b8d829be70cab1439d4c6e18) —
+a persistent, compounding knowledge base inspired by Karpathy's LLM Wiki, extended for autonomous agents.
+
+The pattern solves the core problem of LLM agents: they forget everything when a session ends.
+The KB acts as long-term memory — written by the agent, read by the agent, queryable in < 200ms without a vector DB.
+
+```python
+from nova.kb import KBManager, KBSync, KBSearch
+from nova.kb.sync import local_embed   # no API key needed
+
+# Write operational knowledge
+kb = KBManager("~/.agent/kb")
+kb.write(
+    name="ssl-cert-error",
+    subdir="fixes",
+    page_type="fix",
+    tags=["ssl", "docker"],
+    status="resolved",
+    body="## Root Cause\nMissing REQUESTS_CA_BUNDLE...\n\n## Fix\nSet in .env: REQUESTS_CA_BUNDLE=...",
+)
+
+# Incremental embedding sync — only re-embeds changed pages
+sync = KBSync("~/.agent/kb", "~/.agent/embeddings.db", embed_fn=local_embed)
+sync.run()  # {"indexed": 3, "skipped": 12, "errors": 0}
+
+# Hybrid search: BM25 keyword + cosine similarity, no external vector DB
+search = KBSearch("~/.agent/kb", "~/.agent/embeddings.db")
+results = search.query("ssl certificate error", mode="hybrid", top_k=5)
+# → [{"path": "fixes/ssl-cert-error.md", "score": 0.87, "snippet": "..."}]
+```
+
+**Run the quickstart example (no API key needed):**
+```bash
+python examples/kb_quickstart.py
+```
+
+**CLI sync:**
+```bash
+# Keyword-only (instant, no API)
+python -m nova.kb.sync --kb ~/.agent/kb --db ~/.agent/embeddings.db
+
+# With local embeddings (sentence-transformers, no API cost)
+pip install sentence-transformers
+python -m nova.kb.sync --kb ~/.agent/kb --db ~/.agent/embeddings.db --backend local
+
+# With OpenAI embeddings
+python -m nova.kb.sync --kb ~/.agent/kb --db ~/.agent/embeddings.db \
+  --backend openai --api-key $OPENAI_API_KEY
+
+# Search
+python -m nova.kb.search "ssl certificate error" --kb ~/.agent/kb --db ~/.agent/embeddings.db
+```
+
+**Key design decisions:**
+- **SQLite only** — no Pinecone, Chroma, or Weaviate. Float32 blobs stored directly in `embeddings.db`.
+- **Hash-based dedup** — pages only re-embedded when content actually changes (sha256 check).
+- **H2-section chunking** — finds the *specific section* of a page, not just the page.
+- **Pluggable backends** — OpenAI, sentence-transformers, Ollama, or keyword-only fallback.
+- **Multi-namespace** — search across KB + project KB + past sessions in one query.
+
+See the [canonical pattern doc](https://gist.github.com/noivan0/2c1129a2b8d829be70cab1439d4c6e18) for
+the full two-layer memory model, `[ACTIVE]` tag system, session continuity protocol, and more.
+
+---
+
 ## Evolution Log
 
 Every harness run is automatically appended to `harnesses/<name>/evolution.md` (Markdown)
@@ -742,6 +813,11 @@ NOVA/
 │   │   ├── checkpoint.py    # Resumable state — JSON file per harness
 │   │   ├── evolution.py     # Run history — Markdown + JSONL logging
 │   │   └── kb.py            # Markdown knowledge base — read/write/search
+│   ├── kb/                  # Agent KB Pattern module (v1.2.0)
+│   │   ├── __init__.py      # KBManager · KBSync · KBSearch
+│   │   ├── manager.py       # Read/write KB pages with YAML frontmatter validation
+│   │   ├── sync.py          # Incremental embedding sync into SQLite (hash-based dedup)
+│   │   └── search.py        # Hybrid BM25 + cosine search, no external vector DB
 │   ├── providers/
 │   │   ├── llm.py           # OpenAI · Anthropic · Ollama · Custom · Echo
 │   │   ├── notifier.py      # Telegram · Slack · Discord · Webhook · None
@@ -759,7 +835,8 @@ NOVA/
 ├── examples/
 │   ├── quickstart.py        # Minimal programmatic usage example
 │   ├── custom_provider.py   # How to implement a custom LLM provider
-│   └── custom_publisher.py  # How to implement a custom publisher
+│   ├── custom_publisher.py  # How to implement a custom publisher
+│   └── kb_quickstart.py     # Agent KB Pattern — self-contained demo (no API key needed)
 ├── tests/
 │   ├── unit/                # Checkpoint · Evolution · Harness loader · KB (no API key)
 │   └── integration/         # Orchestrator with echo provider (no API key needed)
@@ -882,6 +959,7 @@ by adding it to the `get_llm_provider()` / `get_publisher()` factory functions.
 - [ ] Harness marketplace (share and import community harnesses)
 - [ ] Streaming LLM output support
 - [ ] NOVA MCP server (use as a Model Context Protocol tool)
+- [ ] `nova/kb/` — Obsidian headless sync for remote KB browsing
 
 ---
 
