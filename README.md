@@ -39,17 +39,31 @@ python -m nova.watcher.kb   --nova-home ~/.nova
 ```bash
 pip install nova-orchestrator
 
-# Scaffold a new workflow
-nova init my-workflow
+# 1. Initialize your NOVA data directory (creates brain.db, engines, kb, wiki, kanban)
+nova setup
 
-# Run it (uses echo provider — no API key needed)
-nova run my-workflow
+# 2. Start the autonomous watchers
+nova watcher start
 
-# Run with OpenAI
-NOVA_LLM_API_KEY=sk-... nova run my-workflow --provider openai
+# 3. Check status
+nova watcher status
+
+# 4. Run your first harness
+nova run research --context topic="transformer attention mechanisms"
 ```
 
-See [docs/guides/quickstart.md](docs/guides/quickstart.md) for a full walkthrough.
+That's it. NOVA is now watching your knowledge base. Every harness run accumulates
+takes into `brain.db`. When enough takes accumulate, the watchers automatically trigger
+learning, synthesis, and wiki updates — no cron jobs required.
+
+### One-liner end-to-end test (no API key)
+
+```bash
+pip install nova-orchestrator
+nova setup --nova-home /tmp/nova-test
+nova run research --provider echo --nova-home /tmp/nova-test --context topic="test"
+nova watcher status --nova-home /tmp/nova-test
+```
 
 ---
 
