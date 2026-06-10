@@ -105,10 +105,10 @@ def main() -> None:
     args = parser.parse_args()
 
     # Lazy import to keep startup fast
-    from nova.core.config import load_config
-    from nova.core.harness import HarnessLoader
     from nova.core.checkpoint import Checkpoint
+    from nova.core.config import load_config
     from nova.core.evolution import EvolutionLog
+    from nova.core.harness import HarnessLoader
     from nova.core.kb import KB
     from nova.core.orchestrator import Orchestrator
     from nova.inspect import ArchitectureAnalyzer, render_markdown_report
@@ -193,12 +193,12 @@ def main() -> None:
             print(f"Evolution log — {args.harness} (last {len(entries)} runs, "
                   f"failure rate: {failure_rate:.0%})")
             print("-" * 60)
-            for e in reversed(entries):
-                status = "OK" if e["success"] else "FAIL"
-                score = f"  q={e['quality_score']}" if e["quality_score"] else ""
-                print(f"  [{status}] {e['run_id']}  {e['duration_secs']}s{score}")
-                if e["phases_failed"]:
-                    print(f"         failed: {e['phases_failed']}")
+            for entry in reversed(entries):
+                status = "OK" if entry["success"] else "FAIL"
+                score = f"  q={entry['quality_score']}" if entry["quality_score"] else ""
+                print(f"  [{status}] {entry['run_id']}  {entry['duration_secs']}s{score}")
+                if entry["phases_failed"]:
+                    print(f"         failed: {entry['phases_failed']}")
 
     # ------------------------------------------------------------------ #
     # kb

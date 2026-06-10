@@ -18,8 +18,8 @@ Usage:
 from __future__ import annotations
 
 import json
-import urllib.request
 import urllib.parse
+import urllib.request
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
@@ -130,7 +130,10 @@ class GhostPublisher(Publisher):
         self.api_key = cfg.api_key  # "id:secret"
 
     def _get_jwt(self) -> str:
-        import hmac, hashlib, base64, time
+        import base64
+        import hashlib
+        import hmac
+        import time
         key_id, secret = self.api_key.split(":")
         now = int(time.time())
         header = base64.urlsafe_b64encode(

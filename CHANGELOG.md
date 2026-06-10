@@ -6,6 +6,37 @@ NOVA uses [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.3.0] — 2026-06-10
+
+### Added
+- **Autonomous Event Loop** — inotify-based brain watcher and KB watcher replace all cron jobs
+  - `brain_watcher` reacts to `nova_brain.db` / `kanban.db` changes instantly (non-recursive, noise-free)
+  - `kb_watcher` reacts to KB markdown and `SKILL.md` changes (recursive, with debounce)
+  - 14 cron jobs eliminated: dream, brain-sync, skill-kb-bridge, wiki-synthesize, kb-index, memory-slim, resource collectors, and more
+- **Cascade (piggyback) reactions** on brain events:
+  - `wiki crosslink` after synthesize/dream (6 h cooldown)
+  - `wiki takes summary` after dream (12 h cooldown)
+  - `wiki stale refresh` after dream (24 h cooldown, background)
+  - `RSS resource update` after synthesize/dream/learn (6 h cooldown)
+  - `resource collector` (deep) after dream (7-day cooldown, background)
+- **Published hook server v2** — POST /publish now triggers `sync_published` (10 min cooldown)
+  and `geo_bible update` (6 h cooldown, only when data changed) immediately
+- `docs/guides/autonomous-event-loop.md` — full documentation of the event-driven autonomy pattern
+
+### Changed
+- `brain_watcher` watch scope narrowed to DB file paths only (non-recursive) — eliminates
+  spurious restarts from `.curator_backups/`, log files, and cache directories
+- ISDIR + CREATE restart gated behind whitelist (`kanban/boards/` only)
+- `kb_watcher`: `SKILL.md` changes now also trigger `kb_index` rebuild (previously only `skill_kb_bridge`)
+- Import order standardised across `cli/main.py`, `providers/publisher.py` (isort)
+- CLI evolution log loop variable renamed `e` → `entry` (clarity)
+- Test: `inspect path --from main` → `--from nova.cli.main.main` (ambiguity fix after kb_quickstart.main added)
+
+### Fixed
+- `nova/inspect` `find_path("main", ...)` — ambiguous when multiple `main` symbols exist after kb_quickstart example was added; now requires fully-qualified qualname
+
+---
+
 ## [1.2.0] — 2026-05-12
 
 ### Added

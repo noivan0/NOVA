@@ -61,6 +61,7 @@ That one command: searches from multiple angles → synthesises findings → run
 - **RunBook** — declarative failure recovery: `rate limit → wait 60s → retry`, `timeout → notify`
 - **Evolution Log** — per-harness run history in Markdown + JSONL; track quality score trends
 - **Knowledge Base (KB)** — persistent markdown store across runs; inject prior context into prompts. Full Agent KB Pattern module (`nova/kb/`) with hybrid BM25 + vector search, pluggable embedding backends, and incremental SQLite sync
+- **Autonomous Event Loop** — inotify-based watcher replaces cron jobs; reacts to DB/KB changes instantly. 14 cron jobs eliminated, zero polling loops. See [Autonomous Event Loop guide](docs/guides/autonomous-event-loop.md)
 - **Native architecture intelligence** — build a local structural graph, inspect hotspots, bridges, and execution paths without external graph tooling
 - **Zero infrastructure** — no databases, no message queues, no Docker required; pure Python + YAML
 - **Minimal dependencies** — core requires only `pyyaml`; LLM SDKs are optional extras
@@ -843,11 +844,12 @@ NOVA/
 ├── docs/
 │   ├── architecture.md      # Deep-dive architecture documentation
 │   └── guides/
-│       ├── quickstart.md        # Step-by-step first run guide
-│       ├── writing-harnesses.md # Complete harness authoring guide
-│       ├── providers.md         # Provider setup (OpenAI, Anthropic, Ollama, …)
-│       ├── quality-gates.md     # How quality scoring works
-│       └── custom-provider.md   # How to add a custom LLM / publisher / notifier
+│       ├── quickstart.md              # Step-by-step first run guide
+│       ├── writing-harnesses.md       # Complete harness authoring guide
+│       ├── providers.md               # Provider setup (OpenAI, Anthropic, Ollama, …)
+│       ├── quality-gates.md           # How quality scoring works
+│       ├── custom-provider.md         # How to add a custom LLM / publisher / notifier
+│       └── autonomous-event-loop.md   # Event-driven autonomy — replace cron with inotify
 ├── CONTRIBUTING.md          # Contributor guide (setup, style, PR process)
 ├── CHANGELOG.md             # Version history
 ├── docker-compose.yml       # Docker Compose for containerised runs

@@ -20,7 +20,10 @@ def test_inspect_build_and_path_commands():
     assert "Built architecture graph:" in build.stdout
     assert (REPO_ROOT / ".nova-arch" / "graph.json").exists()
 
-    path = run_cli("inspect", "path", ".", "--from", "main", "--to", "Orchestrator")
+    # [EP-NOVA-001 FIX 2026-06-04] "main" 단독 사용 시 examples.kb_quickstart.main 과
+    # nova.cli.main.main 중 알파벳순 첫 번째가 선택되어 경로 탐색 실패 (ambiguity)
+    # → qualname 명시로 수정 (옵션 A: 안전, 구조 변경 없음)
+    path = run_cli("inspect", "path", ".", "--from", "nova.cli.main.main", "--to", "Orchestrator")
     assert path.returncode == 0
     assert "Orchestrator" in path.stdout
 

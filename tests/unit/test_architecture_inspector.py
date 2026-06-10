@@ -21,7 +21,9 @@ def test_architecture_paths_recover_expected_flow():
     analyzer = ArchitectureAnalyzer(Path(__file__).resolve().parents[2])
     graph = analyzer.build()
 
-    path_main_to_orch = analyzer.find_path(graph, "main", "Orchestrator")
+    # fully-qualified qualname 사용 — "main" 단독 사용 시 examples.kb_quickstart.main과
+    # nova.cli.main.main 중 [0] 선택으로 오탐 발생 (6835e04 이후 ambiguity)
+    path_main_to_orch = analyzer.find_path(graph, "nova.cli.main.main", "Orchestrator")
     assert path_main_to_orch.found is True
 
     path_orch_to_ckpt = analyzer.find_path(graph, "Orchestrator", "Checkpoint")
