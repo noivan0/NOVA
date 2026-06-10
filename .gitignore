@@ -3,6 +3,8 @@ workspace/
 output/
 .nova-arch/
 graphify-out/
+docs/release/
+.coverage
 *.pyc
 __pycache__/
 .pytest_cache/
@@ -11,3 +13,5 @@ dist/
 build/
 .ruff_cache/
 .mypy_cache/
+docs/plans/
+docs/reports/
