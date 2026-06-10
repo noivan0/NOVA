@@ -1,201 +1,294 @@
 # Quickstart Guide
 
-This guide walks you through your first NOVA run in 5 minutes.
+Get NOVA running in 5 minutes — harness pipelines, autonomous watchers, and all.
 
 ---
 
 ## Prerequisites
 
-- Python 3.10 or higher
-- An API key for at least one LLM provider (or use the built-in `echo` provider — no key needed)
+- Python 3.10+
+- Linux (for watchers — requires `inotifywait`). macOS/Windows: harnesses work fine; watchers need inotify-tools or an equivalent.
+- An LLM API key, **or** use the built-in `echo` provider (no key — great for testing)
 
 ---
 
-## Step 1: Clone and install
+## Step 1: Install
 
 ```bash
-git clone https://github.com/noivan0/NOVA.git
-cd NOVA
+# No API key — echo provider, perfect for first run
+pip install nova-orchestrator
+
+# With OpenAI
+pip install "nova-orchestrator[openai]"
+
+# With Anthropic Claude
+pip install "nova-orchestrator[anthropic]"
+
+# With Ollama (local, no cost)
+pip install "nova-orchestrator[ollama]"
+
+# Everything
+pip install "nova-orchestrator[all]"
 ```
 
-Choose your LLM provider:
+Verify:
 
 ```bash
-# No API key? Use the echo provider — perfect for testing harness structure
-pip install -e "."
-
-# OpenAI (gpt-4o, o3, o4-mini, gpt-5 …)
-pip install -e ".[openai]"
-
-# Anthropic Claude (claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5)
-pip install -e ".[anthropic]"
-
-# Local Ollama — no API key, no cost
-pip install -e ".[ollama]"
-
-# All providers at once
-pip install -e ".[all]"
-```
-
-Verify the installation:
-
-```bash
-nova --help
+nova --version
+# nova 1.3.0
 ```
 
 ---
 
-## Step 2: Try it immediately — no API key needed
-
-NOVA includes an `echo` provider that mirrors your prompt back as output.
-Use it to validate harness structure, test checkpointing, and explore the
-CLI — all without touching an API.
+## Step 2: Initialize your NOVA home
 
 ```bash
-# Set echo as your provider (no .env needed)
-NOVA_LLM_PROVIDER=echo nova run research --context topic="AI agents"
+nova setup
 ```
 
-You'll see the full pipeline execute: phases run, quality gates fire,
-evolution log is written, output appears in `workspace/research/`.
+This creates `~/.nova/` with:
 
----
-
-## Step 3: Configure a real LLM
-
-```bash
-cp .env.example .env
+```
+~/.nova/
+├── brain.db          ← SQLite knowledge store (pages, takes, events)
+├── memory.md         ← Persistent agent memory
+├── kb/               ← Knowledge base markdown files
+│   ├── lessons/
+│   └── synthesis/
+├── wiki/             ← Auto-generated wiki pages
+│   ├── entities/
+│   └── concepts/
+├── kanban/boards/    ← Task tracking (optional)
+├── engines/          ← Built-in reaction engines (auto-installed)
+│   ├── dream.py
+│   ├── learn.py
+│   ├── synthesize.py
+│   ├── chain.py
+│   ├── fix_orphan.py
+│   └── memory_slim.py
+└── logs/             ← Watcher logs and pid files
 ```
 
-Open `.env` and set your provider:
+Use a custom location:
 
-**OpenAI:**
 ```bash
-NOVA_LLM_PROVIDER=openai
-NOVA_LLM_MODEL=gpt-4o
-NOVA_LLM_API_KEY=sk-...
-```
-
-**Anthropic Claude:**
-```bash
-NOVA_LLM_PROVIDER=anthropic
-NOVA_LLM_MODEL=claude-sonnet-4-6
-NOVA_LLM_API_KEY=sk-ant-...
-```
-
-**Ollama (local, free):**
-```bash
-# First: install Ollama from https://ollama.com and pull a model
-# ollama pull llama3.3
-
-NOVA_LLM_PROVIDER=ollama
-NOVA_LLM_MODEL=llama3.3
-# No API key needed
+nova setup --nova-home ~/my-project/nova
+export NOVA_HOME=~/my-project/nova   # add to .bashrc / .zshrc
 ```
 
 ---
 
-## Step 4: Dry run (preview without API calls)
+## Step 3: Start the autonomous watchers (Linux only)
 
-Before spending any tokens, preview what will happen:
+Install inotify-tools if you haven't already:
 
 ```bash
-nova run research --context topic="artificial intelligence" --dry-run
+sudo apt-get install inotify-tools   # Debian/Ubuntu
+sudo dnf install inotify-tools       # Fedora/RHEL
 ```
 
-You'll see the phase plan and prompt previews — no API calls made.
+Start all watchers:
+
+```bash
+nova watcher start
+```
+
+Check they're running:
+
+```bash
+nova watcher status
+# NOVA watcher status (nova_home=~/.nova)
+#
+#   [brain-watcher] RUNNING (pid=12345)
+#   [kb-watcher]    RUNNING (pid=12346)
+#   [hook-server]   RUNNING (pid=12347)
+#
+#   brain.db: takes=0 orphan=0 health=100.0
+```
+
+Stop when you're done:
+
+```bash
+nova watcher stop
+```
+
+> **macOS / Windows**: skip this step. Harnesses still run and accumulate knowledge — you just
+> trigger the engines manually: `python -m nova.engine.learn`, `python -m nova.engine.dream`, etc.
 
 ---
 
-## Step 5: Run your first harness
+## Step 4: Run a harness
 
-### Research harness
-
-Gathers information from multiple angles and synthesises a structured report:
+### No API key (echo provider)
 
 ```bash
-nova run research --context topic="the future of AI agents"
+nova run research --provider echo --context topic="transformer attention mechanisms"
 ```
 
-Output appears in `workspace/research/`:
-- `web_research.md` — research findings
-- `kb_context.md` — relevant prior KB context
-- `report.md` — synthesised final report
-
-### Summarizer harness
-
-Multi-level summary from any text (TL;DR, key points, deep analysis):
+### With OpenAI
 
 ```bash
-nova run summarizer --context text_file=my_article.txt
+NOVA_LLM_API_KEY=sk-... nova run research --context topic="transformer attention mechanisms"
 ```
 
-### Data Pipeline harness
-
-Profiles a CSV file and produces an insight report:
+### With Anthropic
 
 ```bash
-nova run data-pipeline --context csv_file=data.csv
+NOVA_LLM_API_KEY=sk-ant-... nova run research \
+  --provider anthropic --context topic="transformer attention mechanisms"
+```
+
+### With local Ollama
+
+```bash
+# Start Ollama first: ollama serve
+nova run research --provider ollama --context topic="transformer attention mechanisms"
+```
+
+The run produces:
+- `~/.nova/output/research/report.md` — final output
+- `~/.nova/output/research/evolution.md` — quality score history
+- New **takes** in `brain.db` — picked up by watchers automatically
+
+---
+
+## Step 5: Watch the autonomous loop
+
+After a few harness runs, the watchers react automatically:
+
+```
+takes +5   → learn engine runs  → links takes to KB pages
+takes +15  → synthesize runs    → writes kb/synthesis/nova-*.md
+takes +100 → DreamCycle runs    → computes health score, emits DREAM_DONE event
+```
+
+Check what happened:
+
+```bash
+nova watcher status
+# brain.db: takes=18 orphan=0 health=97.5
+```
+
+Read synthesized knowledge:
+
+```bash
+ls ~/.nova/kb/synthesis/
+# nova-2026-06-10.md
 ```
 
 ---
 
-## Step 6: Inspect results
+## Step 6: Add your own knowledge
+
+You can add knowledge directly — the watchers will react:
+
+```python
+from nova.db.brain import BrainDB
+
+db = BrainDB("~/.nova/brain.db")
+
+# Add a take (atomic knowledge claim)
+db.add_take(
+    claim="Sparse attention reduces quadratic complexity to O(n log n)",
+    holder="my-research",
+    kind="insight",
+    weight=0.9,
+)
+
+# Check state
+print(db.snapshot())
+# {'takes': 19, 'orphan': 0, 'open_contra': 0, 'health': 97.5}
+```
+
+Or write a markdown file to `~/.nova/kb/`:
 
 ```bash
-# See all available harnesses
-nova list
+cat > ~/.nova/kb/my-insight.md << 'EOF'
+---
+title: My First Insight
+type: concept
+---
 
-# Check what ran
-nova status research
+# My First Insight
 
-# View run history and quality scores
-nova evolution research
+Autonomous knowledge systems improve with every run.
+EOF
+```
 
-# Search your knowledge base
-nova kb search "AI"
+The KB watcher detects the new file and syncs it to `brain.db` immediately.
+
+---
+
+## Step 7: Create your own harness
+
+```bash
+nova new my-pipeline --pattern pipeline
+```
+
+This scaffolds `harnesses/my-pipeline/harness.yaml`. Edit it:
+
+```yaml
+name: my-pipeline
+pattern: pipeline
+
+phases:
+  - name: research
+    executor: llm
+    prompt: |
+      Research the following topic and summarise key findings:
+      Topic: {{context.topic}}
+    output_file: research.md
+
+  - name: write
+    executor: llm
+    prompt: |
+      Using this research: {{research.md}}
+      Write a concise technical blog post about {{context.topic}}.
+    output_file: post.md
+    quality_check:
+      enabled: true
+      threshold: 75
+```
+
+Run it:
+
+```bash
+nova run my-pipeline --context topic="vector databases in production"
 ```
 
 ---
 
-## Step 7: Resume an interrupted run
+## Complete CLI reference
 
-If a run is interrupted (network error, timeout, Ctrl+C), resume from exactly where it stopped:
-
-```bash
-nova run research --resume
 ```
+nova setup                         Initialize ~/.nova data directory
+nova watcher start                 Start brain + KB watchers (background)
+nova watcher status                Show watcher state + brain.db stats
+nova watcher stop                  Stop all watchers
 
-NOVA reads the checkpoint and skips phases that already completed successfully.
+nova run <harness>                 Run a harness end-to-end
+nova run <harness> --resume        Resume from last checkpoint
+nova run <harness> --dry-run       Dry run (no LLM calls, no writes)
 
----
+nova new <name> --pattern pipeline Scaffold a new harness
+nova list                          List available harnesses
+nova evolution <harness>           Show run history and quality scores
 
-## Step 8: Create your own harness
+nova kb search <query>             Search the knowledge base
+nova kb list                       List all KB pages
 
-```bash
-nova new my-workflow --pattern pipeline
-```
-
-This creates:
-```
-harnesses/my-workflow/
-├── harness.yaml       ← edit this
-└── prompts/
-    └── step1.txt      ← edit your prompts
-```
-
-Edit `harness.yaml` and run:
-
-```bash
-nova run my-workflow --context key=value
+nova inspect build                 Build architecture graph (current dir)
+nova inspect report                Generate architecture report
+nova inspect hotspots              Show most-connected nodes
+nova inspect path --from A --to B  Find path between two code nodes
 ```
 
 ---
 
 ## What's next?
 
-- [Writing Harnesses](writing-harnesses.md) — full harness authoring guide
-- [Providers](providers.md) — setup for all LLM, notifier, and publisher providers
-- [Custom Provider](custom-provider.md) — add your own LLM or publisher backend
-- [Quality Gates](quality-gates.md) — how automatic output scoring works
-- [Architecture](../architecture.md) — deep-dive into how NOVA works internally
+- [Writing Harnesses](writing-harnesses.md) — full harness YAML reference
+- [Providers](providers.md) — LLM, publisher, notifier configuration
+- [Quality Gates](quality-gates.md) — how automatic scoring works
+- [Autonomous Event Loop](autonomous-event-loop.md) — deep dive into the watcher architecture
+- [Custom Provider](custom-provider.md) — wire in your own LLM or publisher

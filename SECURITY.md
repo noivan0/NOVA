@@ -20,9 +20,8 @@ Please do **not** open a public issue for security vulnerabilities.
 ## Known History Notes
 
 Git history prior to v1.3.0 (commits before `35db9d8`) contains references to internal
-development paths (e.g. `$NOVA_HOME`) in documentation files that
-were added during early development. These are **filesystem paths only** — no credentials,
-API keys, tokens, or sensitive data are present.
+development filesystem paths in documentation files that were added during early development.
+These are **filesystem paths only** — no credentials, API keys, tokens, or sensitive data are present.
 
 The current HEAD (`main` branch, v1.3.0+) contains none of these internal paths.
 All tracked files have been verified clean.
