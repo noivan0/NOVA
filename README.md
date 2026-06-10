@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
   <img src="https://github.com/noivan0/NOVA/actions/workflows/ci.yml/badge.svg" alt="CI"/>
-  <img src="https://img.shields.io/badge/tests-37%20passing-brightgreen?style=flat-square" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-82%20passing-brightgreen?style=flat-square" alt="Tests"/>
   <img src="https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic%20%7C%20Ollama%20%7C%20Custom-orange?style=flat-square" alt="LLM Providers"/>
 </p>
 
@@ -17,87 +17,328 @@
 
 ## What is NOVA?
 
-NOVA is an AI orchestration framework built around two core ideas:
+NOVA is an AI orchestration framework built around two ideas:
 
 **1. Declarative pipelines** — define multi-step AI workflows in a YAML harness file and run them with one command. Checkpointing, quality gates, failure recovery, and evolution logging are built in.
 
-**2. Autonomous event loop** — instead of polling or cron jobs, NOVA watches its own knowledge database for real changes and reacts instantly. Learns accumulate → synthesize runs → wiki updates → next run is smarter. No timers. No wasted cycles.
+**2. Autonomous event loop** — instead of polling or cron jobs, NOVA watches its own knowledge database for real changes and reacts instantly. Knowledge accumulates → synthesis runs → wiki updates → next run is smarter. No timers. No wasted cycles.
+
+---
+
+## Installation
 
 ```bash
-# Run a research pipeline
-nova run research --context topic="transformer attention mechanisms"
+# Core (no API key required — works with the built-in echo provider)
+pip install nova-orchestrator
 
-# Start the autonomous watchers
-python -m nova.watcher.brain --nova-home ~/.nova
-python -m nova.watcher.kb   --nova-home ~/.nova
+# With OpenAI
+pip install "nova-orchestrator[openai]"
+
+# With Anthropic Claude
+pip install "nova-orchestrator[anthropic]"
+
+# With local Ollama (no cost, no API key)
+pip install "nova-orchestrator[ollama]"
+
+# Everything
+pip install "nova-orchestrator[all]"
+```
+
+Verify:
+
+```bash
+nova --version
+# nova 1.3.0
 ```
 
 ---
 
-## Quick Start
+## Setup
+
+Initialize your NOVA data directory. This creates `~/.nova/` with brain.db, engines, KB, wiki, and kanban directories — everything you need.
 
 ```bash
-pip install nova-orchestrator
-
-# 1. Initialize your NOVA data directory (creates brain.db, engines, kb, wiki, kanban)
 nova setup
-
-# 2. Start the autonomous watchers
-nova watcher start
-
-# 3. Check status
-nova watcher status
-
-# 4. Run your first harness
-nova run research --context topic="transformer attention mechanisms"
 ```
 
-That's it. NOVA is now watching your knowledge base. Every harness run accumulates
-takes into `brain.db`. When enough takes accumulate, the watchers automatically trigger
-learning, synthesis, and wiki updates — no cron jobs required.
+What gets created:
 
-### One-liner end-to-end test (no API key)
+```
+~/.nova/
+├── brain.db          ← SQLite knowledge store (pages, takes, events, health)
+├── memory.md         ← Persistent agent memory (auto-trimmed at 85% capacity)
+├── kb/               ← Knowledge base markdown files
+│   ├── lessons/      ← Lesson pages (auto-indexed by wiki synthesizer)
+│   └── synthesis/    ← Auto-generated synthesis pages
+├── wiki/             ← Auto-generated wiki pages
+│   ├── entities/     ← Entity pages + takes summary
+│   └── concepts/     ← Concept pages + lessons index
+├── kanban/boards/    ← Task tracking (optional, integrated with chain engine)
+├── engines/          ← Built-in reaction engines (auto-installed)
+│   ├── dream.py      ← DreamCycle: health score, consolidation (+100 takes / health<90)
+│   ├── learn.py      ← Link takes to KB pages (+5 takes)
+│   ├── synthesize.py ← Takes → KB synthesis pages (+15 takes)
+│   ├── chain.py      ← Promote kanban tasks when dependencies complete
+│   ├── fix_orphan.py ← Assign agents to unowned KB pages
+│   └── memory_slim.py← Trim memory.md when >85% full
+└── logs/             ← Watcher logs and pid files
+```
+
+Use a custom location:
 
 ```bash
-pip install nova-orchestrator
-nova setup --nova-home /tmp/nova-test
-nova run research --provider echo --nova-home /tmp/nova-test --context topic="test"
-nova watcher status --nova-home /tmp/nova-test
+nova setup --nova-home ~/my-project/nova
+
+# Set in your shell so all nova commands use it
+export NOVA_HOME=~/my-project/nova   # add to ~/.bashrc or ~/.zshrc
 ```
 
 ---
 
-## Key Features
+## Starting the Autonomous Watchers
 
-### Declarative Workflows (Harness YAML)
-- **4 execution patterns** — `pipeline` (sequential), `fanout` (parallel branches), `supervisor` (strict QA), `generative` (creative)
-- **4 phase executors** — `llm` (LLM call), `shell` (subprocess), `python` (inline code), `passthrough`
-- **Resumable** — checkpoint saved after every phase; `--resume` picks up exactly where it stopped
-- **Quality Gates** — LLM self-scores its output; NOVA retries if below threshold
-- **RunBook** — declarative failure recovery: `rate limit → wait 60s → retry`
+The watchers replace cron jobs. They react to real changes in `brain.db` and `kb/` instantly — no polling.
 
-### Autonomous Event Loop
-- **Brain Watcher** — watches `brain.db` via inotify; reacts to new knowledge, health drops, orphaned pages
-- **KB Watcher** — watches `kb/` and `skills/` for markdown changes; triggers embedding, index rebuild, wiki synthesis
-- **Hook Server** — lightweight HTTP webhook receiver for publish-complete events
-- **14 reaction types** — learn, synthesize, dream, chain, fix_orphan, memory_slim, wiki crosslink/takes/stale, and more
-- **Zero cron jobs** — all reactions are event-driven, not timer-driven
+**Linux only** — requires `inotify-tools`:
 
-### Knowledge Infrastructure
-- **Brain DB** — SQLite-backed store for knowledge pages, atomic claims (takes), contradictions, and events
-- **KB Pattern** — persistent markdown knowledge base with hybrid BM25 + vector search
-- **Wiki Synthesis** — crosslink, stale refresh, takes summarization, lessons index
-- **Evolution Log** — every harness run recorded in Markdown + JSONL; track quality trends across hundreds of runs
+```bash
+sudo apt-get install inotify-tools   # Debian/Ubuntu
+sudo dnf install inotify-tools       # Fedora/RHEL
+```
 
-### Architecture Intelligence
-- **Graph analysis** — build a structural graph of your codebase; find hotspots, bridges, critical paths
-- **`nova inspect`** — CLI commands to query the graph without external tools
+Start all watchers:
 
-### Provider Abstraction
-- **LLM** — OpenAI, Anthropic, Ollama, or any OpenAI-compatible endpoint
-- **Publisher** — WordPress, Ghost, or local file
-- **Notifier** — Telegram, Slack, Discord
-- **Zero lock-in** — swap any provider via one config line
+```bash
+nova watcher start
+```
+
+Check status:
+
+```bash
+nova watcher status
+# NOVA watcher status (nova_home=~/.nova)
+#
+#   [brain-watcher] RUNNING (pid=12345)
+#   [kb-watcher]    RUNNING (pid=12346)
+#   [hook-server]   RUNNING (pid=12347)
+#
+#   brain.db: takes=0 orphan=0 health=100.0
+```
+
+Stop:
+
+```bash
+nova watcher stop
+```
+
+> **macOS / Windows**: watchers require inotify (Linux). Harnesses still run and accumulate knowledge — trigger engines manually when needed: `python -m nova.engine.learn`, `python -m nova.engine.dream`, etc.
+
+**What the watchers do:**
+
+| Event | Engine triggered | Cooldown |
+|---|---|---|
+| takes +5 | `learn` — link takes to KB pages | 30 min |
+| takes +15 | `synthesize` — write KB synthesis pages | 5 min |
+| takes +100 | `dream` — health score + consolidation | 2 h |
+| orphan ≥ 3 | `fix_orphan` — assign agents to pages | 30 s |
+| health < 90 | `dream` — emergency consolidation | 2 h |
+| kanban done++ | `chain` — promote dependent tasks | 10 s |
+| memory ≥ 85% | `memory_slim` — trim memory.md | 30 min |
+
+---
+
+## Running a Harness
+
+### No API key (echo provider — for testing)
+
+```bash
+nova run research --provider echo --context topic="transformer attention mechanisms"
+```
+
+### With OpenAI
+
+```bash
+export NOVA_LLM_API_KEY=sk-...
+nova run research --context topic="transformer attention mechanisms"
+```
+
+### With Anthropic Claude
+
+```bash
+export NOVA_LLM_API_KEY=sk-ant-...
+nova run research --provider anthropic --context topic="transformer attention mechanisms"
+```
+
+### With local Ollama
+
+```bash
+# Start Ollama first: ollama serve
+nova run research --provider ollama --context topic="transformer attention mechanisms"
+```
+
+### Resume a failed run
+
+```bash
+nova run research --resume --context topic="transformer attention mechanisms"
+```
+
+Every run automatically accumulates knowledge takes into `brain.db`. The watchers pick these up and react — no manual steps needed.
+
+---
+
+## Creating Your Own Harness
+
+```bash
+nova new my-pipeline --pattern pipeline
+```
+
+Edit `harnesses/my-pipeline/harness.yaml`:
+
+```yaml
+name: my-pipeline
+pattern: pipeline   # pipeline | fanout | supervisor | generative
+
+phases:
+  - name: research
+    executor: llm
+    prompt: |
+      Research the following and summarise key findings:
+      Topic: {{context.topic}}
+    output_file: research.md
+
+  - name: write
+    executor: llm
+    prompt: |
+      Using this research:
+      {{research.md}}
+
+      Write a concise technical blog post about {{context.topic}}.
+    output_file: post.md
+    quality_check:
+      enabled: true
+      threshold: 75      # 0-100; auto-retries if below
+      max_retries: 2
+
+  - name: notify
+    executor: shell
+    command: "echo 'Done: {{output_dir}}/post.md'"
+```
+
+Run it:
+
+```bash
+nova run my-pipeline --context topic="vector databases in production"
+```
+
+---
+
+## Adding Knowledge Directly
+
+You can add knowledge directly — the watchers react automatically:
+
+```python
+from nova.db.brain import BrainDB
+
+db = BrainDB("~/.nova/brain.db")
+
+db.add_take(
+    claim="Sparse attention reduces quadratic complexity to O(n log n)",
+    holder="my-research",
+    kind="insight",   # fact | insight | lesson | pattern
+    weight=0.9,       # 0.0–1.0 quality score
+)
+
+# Check current state
+print(db.snapshot())
+# {'takes': 1, 'orphan': 0, 'open_contra': 0, 'health': 100.0}
+```
+
+Or drop a markdown file into `~/.nova/kb/` — the KB watcher syncs it to `brain.db` immediately:
+
+```bash
+cat > ~/.nova/kb/my-note.md << 'EOF'
+---
+title: My First Note
+type: concept
+---
+
+# My First Note
+
+Autonomous systems improve with every interaction.
+EOF
+```
+
+---
+
+## CLI Reference
+
+```
+nova --version                     Show version
+
+nova setup                         Initialize ~/.nova data directory
+nova setup --nova-home <path>      Use a custom data directory
+nova setup --no-install-engines    Skip built-in engine installation
+
+nova watcher start                 Start brain + KB watchers (background)
+nova watcher start --no-hook       Skip hook server
+nova watcher status                Show watcher state + brain.db stats
+nova watcher stop                  Stop all watchers
+
+nova run <harness>                 Run a harness end-to-end
+nova run <harness> --resume        Resume from last checkpoint
+nova run <harness> --dry-run       Dry run (no LLM calls, no writes)
+nova run <harness> --provider <p>  Override LLM provider (openai|anthropic|ollama|echo)
+nova run <harness> --context k=v   Pass context variables to the harness
+
+nova new <name>                    Scaffold a new harness (pipeline pattern)
+nova new <name> --pattern fanout   Scaffold with a specific pattern
+nova list                          List available harnesses
+nova evolution <harness>           Show run history and quality scores
+nova status <harness>              Show checkpoint state
+
+nova kb search <query>             Search the knowledge base
+nova kb list                       List all KB pages
+nova kb write <key> <file>         Write a file into the KB
+
+nova inspect build                 Build architecture graph (current repo)
+nova inspect report                Generate Markdown architecture report
+nova inspect hotspots              Show most-connected nodes
+nova inspect bridges               Show bridge nodes
+nova inspect path --from A --to B  Find path between two nodes
+```
+
+---
+
+## LLM Providers
+
+Configure in `nova.yaml` or via environment variables:
+
+| Provider | `nova.yaml` | Environment variable |
+|---|---|---|
+| OpenAI | `provider: openai` | `NOVA_LLM_API_KEY=sk-...` |
+| Anthropic | `provider: anthropic` | `NOVA_LLM_API_KEY=sk-ant-...` |
+| Ollama | `provider: ollama` | *(no key needed)* |
+| Custom / Enterprise | `provider: custom`, `base_url: https://...` | `NOVA_LLM_API_KEY=...` |
+| Echo (testing) | `provider: echo` | *(no key needed)* |
+
+Example `nova.yaml`:
+
+```yaml
+llm:
+  provider: openai
+  model: gpt-4o
+  api_key: ""          # leave blank, use NOVA_LLM_API_KEY env var
+  max_tokens: 4096
+  temperature: 0.7
+
+notifier:
+  backend: telegram
+  token: ""            # NOVA_NOTIFIER_TOKEN
+
+publisher:
+  backend: local
+  output_dir: ./output
+```
 
 ---
 
@@ -111,7 +352,6 @@ nova watcher status --nova-home /tmp/nova-test
             ┌────────────▼────────────┐
             │      Config Layer        │
             │  nova.yaml + NOVA_* env  │
-            │  LLM · Notifier · Pub    │
             └────────────┬────────────┘
                          │
             ┌────────────▼────────────┐
@@ -120,202 +360,61 @@ nova watcher status --nova-home /tmp/nova-test
             │  → Evolution Log         │
             └──┬──────────┬───────────┘
                │          │
-    ┌──────────▼─┐   ┌────▼──────────┐
-    │  Harness   │   │   KB Layer    │
-    │  YAML spec │   │  brain.db     │
-    │  phases[]  │   │  kb/ pages   │
-    └──────┬─────┘   │  wiki/ synth │
-           │         └──────────────┘
-    ┌──────▼────────────────────────────────────┐
-    │              Phase Execution               │
-    │  llm → LLMProvider.complete(prompt)        │
-    │  shell → subprocess.run(command)           │
-    │  python → exec(code)                       │
-    │  passthrough → forward context             │
-    │                                            │
-    │  → Quality Gate (score < threshold → retry)│
-    │  → RunBook (failure → recover rule)        │
-    └───────────────────────────────────────────┘
+    ┌──────────▼──┐  ┌────▼──────────┐
+    │   Harness   │  │   KB Layer    │
+    │  phases[]   │  │  brain.db     │
+    └──────┬──────┘  │  kb/ pages    │
+           │         │  wiki/ synth  │
+    ┌──────▼──────────────────────────────┐
+    │           Phase Execution            │
+    │  llm    → LLMProvider.complete()     │
+    │  shell  → subprocess.run()           │
+    │  python → exec(inline code)          │
+    │                                      │
+    │  Quality Gate: score < threshold     │
+    │    → auto-retry (max_retries times)  │
+    │  RunBook: failure → recover rule     │
+    └─────────────────────────────────────┘
 
-┌────────────────────────────────────────────────────────────────────┐
-│  Autonomous Loop (always running alongside harnesses)               │
+┌─────────────────────────────────────────────────────────────────────┐
+│  Autonomous Loop  (runs alongside harnesses, event-driven)          │
 │                                                                      │
-│  brain.db changes → BrainWatcher → learn / synthesize / dream       │
-│  kb/ changes     → KBWatcher    → kb_pipeline / wiki / index        │
-│  POST /publish   → HookServer   → sync_published / geo_update       │
-└────────────────────────────────────────────────────────────────────┘
+│  brain.db changes  →  BrainWatcher  →  learn / synthesize / dream   │
+│  kb/ changes       →  KBWatcher     →  embed / wiki / index         │
+│  POST /publish     →  HookServer    →  sync / geo_update            │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Directory Structure
+## Repository Structure
 
 ```
-nova-orchestrator/
+NOVA/
 ├── nova/
-│   ├── core/                # Harness engine
-│   │   ├── orchestrator.py  # Main execution loop
-│   │   ├── harness.py       # Harness YAML loader
-│   │   ├── checkpoint.py    # Phase checkpointing
-│   │   ├── evolution.py     # Run history log
-│   │   ├── config.py        # Config + provider resolution
-│   │   └── kb.py            # KB integration (inject prior context)
-│   ├── watcher/             # Autonomous event loop
-│   │   ├── brain.py         # BrainWatcher: brain.db inotify reactions
-│   │   ├── kb.py            # KBWatcher: kb/ + skills/ inotify sync
-│   │   └── hook_server.py   # HTTP webhook receiver for publish events
-│   ├── db/                  # Brain database
-│   │   ├── brain.py         # BrainDB: pages, takes, events
-│   │   └── schema.py        # SQLite DDL
-│   ├── wiki/                # Wiki synthesis
-│   │   └── synthesize.py    # crosslink / takes / stale / index phases
-│   ├── kb/                  # Agent KB Pattern module
-│   │   ├── manager.py       # Read/write KB pages with frontmatter
-│   │   ├── search.py        # Hybrid BM25 + cosine search
-│   │   └── sync.py          # Incremental embedding sync (SQLite)
-│   ├── inspect/             # Architecture graph analysis
-│   │   ├── analyzer.py      # Build structural graph
-│   │   ├── models.py        # Graph models
-│   │   └── report.py        # Markdown report generator
-│   ├── providers/           # LLM / Publisher / Notifier adapters
-│   │   ├── llm.py
-│   │   ├── publisher.py
-│   │   └── notifier.py
-│   └── cli/
-│       └── main.py          # nova CLI entrypoint
-├── harnesses/               # Built-in harness examples
-│   ├── research/
-│   ├── summarizer/
-│   └── data-pipeline/
-├── examples/                # Python API examples
-├── tests/
-│   ├── unit/
-│   └── integration/
+│   ├── core/        # Harness execution engine (orchestrator, checkpoint, evolution, config, kb)
+│   ├── watcher/     # Autonomous event loop (brain.py, kb.py, hook_server.py)
+│   ├── db/          # Brain database (BrainDB, SQLite DDL)
+│   ├── engine/      # Built-in reaction engines (dream, learn, synthesize, chain, fix_orphan, memory_slim)
+│   ├── wiki/        # Wiki synthesis (crosslink, stale, takes, lessons, index)
+│   ├── kb/          # Agent KB Pattern (BM25+vector search, embedding sync)
+│   ├── inspect/     # Architecture graph analysis
+│   ├── providers/   # LLM / Publisher / Notifier adapters
+│   └── cli/         # nova CLI (main.py)
+├── harnesses/       # Built-in examples: research, summarizer, data-pipeline
+├── examples/        # Python API examples + engine reference implementations
+├── tests/           # 82 tests (unit + integration)
 ├── docs/
 │   ├── architecture.md
 │   └── guides/
-│       ├── quickstart.md
-│       ├── writing-harnesses.md
-│       ├── providers.md
-│       ├── quality-gates.md
-│       ├── custom-provider.md
-│       └── autonomous-event-loop.md
-├── nova.yaml                # Default config
-└── CHANGELOG.md
+│       ├── quickstart.md              # Step-by-step first run
+│       ├── writing-harnesses.md       # Full harness YAML reference
+│       ├── providers.md               # LLM/notifier/publisher setup
+│       ├── quality-gates.md           # How quality scoring works
+│       ├── custom-provider.md         # Add your own LLM or publisher
+│       └── autonomous-event-loop.md   # Deep dive: event-driven autonomy
+└── nova.yaml        # Default config (edit this)
 ```
-
----
-
-## Harness Example
-
-`harnesses/research/harness.yaml`:
-
-```yaml
-name: research
-pattern: pipeline
-kb_namespace: research
-
-phases:
-  - name: web_search
-    executor: llm
-    prompt_file: prompts/web_search.txt
-    output_file: search_results.md
-
-  - name: synthesise
-    executor: llm
-    prompt_file: prompts/synthesis.txt
-    input_files: [search_results.md]
-    output_file: report.md
-    quality_check:
-      enabled: true
-      threshold: 70
-      max_retries: 2
-
-  - name: notify
-    executor: shell
-    command: "echo 'Research complete: {{output_dir}}/report.md'"
-```
-
-Run it:
-
-```bash
-nova run research --context topic="quantum computing breakthroughs 2025"
-```
-
----
-
-## Autonomous Loop Quick Start
-
-```bash
-# Install inotify-tools (Linux)
-sudo apt-get install inotify-tools
-
-# Start brain watcher (reacts to brain.db changes)
-python -m nova.watcher.brain --nova-home ~/.nova
-
-# Start KB watcher (reacts to kb/ and skills/ changes)
-python -m nova.watcher.kb --nova-home ~/.nova
-
-# Optional: start hook server (receives publish-complete events)
-python -m nova.watcher.hook_server --nova-home ~/.nova --port 9121
-```
-
-Use the `BrainDB` API to record knowledge takes:
-
-```python
-from nova.db.brain import BrainDB
-
-db = BrainDB("~/.nova/brain.db")
-db.init()
-
-# Record a knowledge claim — triggers learn_engine when enough accumulate
-db.add_take(
-    claim="Hybrid BM25 + vector search outperforms pure vector on domain-specific queries",
-    holder="nova-research",
-    kind="insight",
-    weight=0.9,
-)
-```
-
-See [docs/guides/autonomous-event-loop.md](docs/guides/autonomous-event-loop.md) for the full guide.
-
----
-
-## LLM Providers
-
-| Provider | Config |
-|---|---|
-| OpenAI | `provider: openai`, `NOVA_LLM_API_KEY=sk-...` |
-| Anthropic | `provider: anthropic`, `NOVA_LLM_API_KEY=sk-ant-...` |
-| Ollama | `provider: ollama`, `base_url: http://localhost:11434/v1` |
-| Custom / Enterprise | `provider: custom`, `base_url: https://your-gateway/v1` |
-| Echo (no key, testing) | `provider: echo` |
-
----
-
-## Knowledge Base (KB)
-
-The `nova/kb/` module implements the [Agent KB Pattern](https://gist.github.com/noivan0/2c1129a2b8d829be70cab1439d4c6e18) —
-a persistent, compounding knowledge base that survives across harness runs.
-
-```python
-from nova.kb.search import KBSearch
-
-search = KBSearch("~/.nova/kb", db_path="~/.nova/embeddings.db")
-
-# Hybrid keyword + vector search
-results = search.query("SSL certificate renewal", top_k=5)
-for r in results:
-    print(r["score"], r["path"], r["snippet"])
-```
-
-Features:
-- Hybrid BM25 keyword + cosine vector search
-- No external vector DB — runs entirely on SQLite
-- Multi-namespace: search across KB + sessions + skills in one query
-- Pluggable embedding backends: OpenAI, sentence-transformers, Ollama, or no-op
-- Chunking by H2 sections for precise retrieval
-- Incremental sync — only re-embeds changed files
 
 ---
 
@@ -326,26 +425,29 @@ git clone https://github.com/noivan0/NOVA.git
 cd NOVA
 pip install -e ".[dev]"
 
-# Run tests
+# Run all tests
 pytest
 
-# Run a specific test
-pytest tests/unit/test_kb.py -v
+# Run specific test file
+pytest tests/unit/test_engines.py -v
+
+# Run with coverage
+pytest --cov=nova --cov-report=term-missing
 ```
 
-Requirements: Python 3.10+, pyyaml (core only). LLM SDKs are optional extras.
+Requirements: Python 3.10+. Core dependency: `pyyaml` only. All LLM SDKs are optional extras.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide: setup, coding style, PR process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, coding style, and PR process.
 
-Quick summary:
-- Run `pytest` before submitting a PR
+Quick rules:
+- All tests must pass (`pytest`)
 - Add tests for new features
-- Keep `nova.yaml` provider set to `echo` (no API key required for CI)
-- No hardcoded paths or credentials in any file
+- No hardcoded paths or credentials
+- Keep `nova.yaml` provider as `echo` (CI runs without an API key)
 
 ---
 
