@@ -1,343 +1,54 @@
-# NOVA — Autonomous AI Orchestration Framework
+# NOVA — Full Autonomous Agent System
 
-<p align="center">
-  <b>Declarative workflows. Event-driven autonomy. Self-improving over time.</b><br/>
-  Define complex AI pipelines in YAML. Run them reliably. Let NOVA improve itself.
-</p>
+> **NOVA is not a framework. It is a living operating system for AI agents.**
 
-<p align="center">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square" alt="Python 3.10+"/>
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
-  <img src="https://github.com/noivan0/NOVA/actions/workflows/ci.yml/badge.svg" alt="CI"/>
-  <img src="https://img.shields.io/badge/tests-82%20passing-brightgreen?style=flat-square" alt="Tests"/>
-  <img src="https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic%20%7C%20Ollama%20%7C%20Custom-orange?style=flat-square" alt="LLM Providers"/>
-</p>
+NOVA runs 24/7 without timers. It watches its own memory (SQLite DB), detects changes, and reacts instantly. Every agent knows what every other agent has learned. The system grows smarter by itself.
+
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.4.0-orange)](CHANGELOG.md)
 
 ---
 
-## What is NOVA?
+## What NOVA Does
 
-NOVA is an AI orchestration framework built around two ideas:
+```
+외부 입력 → hermes_events (DB) → brain_watcher 감지 → 에이전트 디스패치
+                ↑                                              ↓
+         nova_brain.db ←────── takes / pages / learn ←────────┘
+         (기억이 변화)          (결과 저장)            (자율 실행)
+```
 
-**1. Declarative pipelines** — define multi-step AI workflows in a YAML harness file and run them with one command. Checkpointing, quality gates, failure recovery, and evolution logging are built in.
-
-**2. Autonomous event loop** — instead of polling or cron jobs, NOVA watches its own knowledge database for real changes and reacts instantly. Knowledge accumulates → synthesis runs → wiki updates → next run is smarter. No timers. No wasted cycles.
+1. **Event-driven**: No polling loops. inotify watches `nova_brain.db` — when memory changes, agents react immediately.
+2. **Self-learning**: Every execution writes `takes` (judgments) and `learn` entries back to the DB. The system compounds.
+3. **Multi-agent**: 36 specialized agents across bin/ and scripts/. Each has a single responsibility.
+4. **KB-linked**: Markdown knowledge base auto-syncs with the DB. Agents can read, write, and cross-link KB pages.
+5. **SOUL-driven**: Each agent has a `SOUL.md` — a declarative identity file that defines its role, tools, and mission.
 
 ---
 
-## Installation
+## Quick Start
 
 ```bash
-# Core (no API key required — works with the built-in echo provider)
-pip install nova-orchestrator
+# 1. Clone
+git clone https://github.com/noivan0/NOVA
+cd NOVA
 
-# With OpenAI
-pip install "nova-orchestrator[openai]"
+# 2. Install + initialize
+bash setup.sh
 
-# With Anthropic Claude
-pip install "nova-orchestrator[anthropic]"
+# 3. Set your API key
+nano ~/.hermes/.env
 
-# With local Ollama (no cost, no API key)
-pip install "nova-orchestrator[ollama]"
+# 4. Start the brain watcher (event engine)
+export HERMES_HOME=$HOME/.hermes
+python3 $HERMES_HOME/scripts/nova_brain_watcher.py &
 
-# Everything
-pip install "nova-orchestrator[all]"
-```
+# 5. Check system health
+python3 $HERMES_HOME/scripts/nova_hermes_briefing.py
 
-Verify:
-
-```bash
-nova --version
-# nova 1.3.0
-```
-
----
-
-## Setup
-
-Initialize your NOVA data directory. This creates `~/.nova/` with brain.db, engines, KB, wiki, and kanban directories — everything you need.
-
-```bash
-nova setup
-```
-
-What gets created:
-
-```
-~/.nova/
-├── brain.db          ← SQLite knowledge store (pages, takes, events, health)
-├── memory.md         ← Persistent agent memory (auto-trimmed at 85% capacity)
-├── kb/               ← Knowledge base markdown files
-│   ├── lessons/      ← Lesson pages (auto-indexed by wiki synthesizer)
-│   └── synthesis/    ← Auto-generated synthesis pages
-├── wiki/             ← Auto-generated wiki pages
-│   ├── entities/     ← Entity pages + takes summary
-│   └── concepts/     ← Concept pages + lessons index
-├── kanban/boards/    ← Task tracking (optional, integrated with chain engine)
-├── engines/          ← Built-in reaction engines (auto-installed)
-│   ├── dream.py      ← DreamCycle: health score, consolidation (+100 takes / health<90)
-│   ├── learn.py      ← Link takes to KB pages (+5 takes)
-│   ├── synthesize.py ← Takes → KB synthesis pages (+15 takes)
-│   ├── chain.py      ← Promote kanban tasks when dependencies complete
-│   ├── fix_orphan.py ← Assign agents to unowned KB pages
-│   └── memory_slim.py← Trim memory.md when >85% full
-└── logs/             ← Watcher logs and pid files
-```
-
-Use a custom location:
-
-```bash
-nova setup --nova-home ~/my-project/nova
-
-# Set in your shell so all nova commands use it
-export NOVA_HOME=~/my-project/nova   # add to ~/.bashrc or ~/.zshrc
-```
-
----
-
-## Starting the Autonomous Watchers
-
-The watchers replace cron jobs. They react to real changes in `brain.db` and `kb/` instantly — no polling.
-
-**Linux only** — requires `inotify-tools`:
-
-```bash
-sudo apt-get install inotify-tools   # Debian/Ubuntu
-sudo dnf install inotify-tools       # Fedora/RHEL
-```
-
-Start all watchers:
-
-```bash
-nova watcher start
-```
-
-Check status:
-
-```bash
-nova watcher status
-# NOVA watcher status (nova_home=~/.nova)
-#
-#   [brain-watcher] RUNNING (pid=12345)
-#   [kb-watcher]    RUNNING (pid=12346)
-#   [hook-server]   RUNNING (pid=12347)
-#
-#   brain.db: takes=0 orphan=0 health=100.0
-```
-
-Stop:
-
-```bash
-nova watcher stop
-```
-
-> **macOS / Windows**: watchers require inotify (Linux). Harnesses still run and accumulate knowledge — trigger engines manually when needed: `python -m nova.engine.learn`, `python -m nova.engine.dream`, etc.
-
-**What the watchers do:**
-
-| Event | Engine triggered | Cooldown |
-|---|---|---|
-| takes +5 | `learn` — link takes to KB pages | 30 min |
-| takes +15 | `synthesize` — write KB synthesis pages | 5 min |
-| takes +100 | `dream` — health score + consolidation | 2 h |
-| orphan ≥ 3 | `fix_orphan` — assign agents to pages | 30 s |
-| health < 90 | `dream` — emergency consolidation | 2 h |
-| kanban done++ | `chain` — promote dependent tasks | 10 s |
-| memory ≥ 85% | `memory_slim` — trim memory.md | 30 min |
-
----
-
-## Running a Harness
-
-### No API key (echo provider — for testing)
-
-```bash
-nova run research --provider echo --context topic="transformer attention mechanisms"
-```
-
-### With OpenAI
-
-```bash
-export NOVA_LLM_API_KEY=sk-...
-nova run research --context topic="transformer attention mechanisms"
-```
-
-### With Anthropic Claude
-
-```bash
-export NOVA_LLM_API_KEY=sk-ant-...
-nova run research --provider anthropic --context topic="transformer attention mechanisms"
-```
-
-### With local Ollama
-
-```bash
-# Start Ollama first: ollama serve
-nova run research --provider ollama --context topic="transformer attention mechanisms"
-```
-
-### Resume a failed run
-
-```bash
-nova run research --resume --context topic="transformer attention mechanisms"
-```
-
-Every run automatically accumulates knowledge takes into `brain.db`. The watchers pick these up and react — no manual steps needed.
-
----
-
-## Creating Your Own Harness
-
-```bash
-nova new my-pipeline --pattern pipeline
-```
-
-Edit `harnesses/my-pipeline/harness.yaml`:
-
-```yaml
-name: my-pipeline
-pattern: pipeline   # pipeline | fanout | supervisor | generative
-
-phases:
-  - name: research
-    executor: llm
-    prompt: |
-      Research the following and summarise key findings:
-      Topic: {{context.topic}}
-    output_file: research.md
-
-  - name: write
-    executor: llm
-    prompt: |
-      Using this research:
-      {{research.md}}
-
-      Write a concise technical blog post about {{context.topic}}.
-    output_file: post.md
-    quality_check:
-      enabled: true
-      threshold: 75      # 0-100; auto-retries if below
-      max_retries: 2
-
-  - name: notify
-    executor: shell
-    command: "echo 'Done: {{output_dir}}/post.md'"
-```
-
-Run it:
-
-```bash
-nova run my-pipeline --context topic="vector databases in production"
-```
-
----
-
-## Adding Knowledge Directly
-
-You can add knowledge directly — the watchers react automatically:
-
-```python
-from nova.db.brain import BrainDB
-
-db = BrainDB("~/.nova/brain.db")
-
-db.add_take(
-    claim="Sparse attention reduces quadratic complexity to O(n log n)",
-    holder="my-research",
-    kind="insight",   # fact | insight | lesson | pattern
-    weight=0.9,       # 0.0–1.0 quality score
-)
-
-# Check current state
-print(db.snapshot())
-# {'takes': 1, 'orphan': 0, 'open_contra': 0, 'health': 100.0}
-```
-
-Or drop a markdown file into `~/.nova/kb/` — the KB watcher syncs it to `brain.db` immediately:
-
-```bash
-cat > ~/.nova/kb/my-note.md << 'EOF'
----
-title: My First Note
-type: concept
----
-
-# My First Note
-
-Autonomous systems improve with every interaction.
-EOF
-```
-
----
-
-## CLI Reference
-
-```
-nova --version                     Show version
-
-nova setup                         Initialize ~/.nova data directory
-nova setup --nova-home <path>      Use a custom data directory
-nova setup --no-install-engines    Skip built-in engine installation
-
-nova watcher start                 Start brain + KB watchers (background)
-nova watcher start --no-hook       Skip hook server
-nova watcher status                Show watcher state + brain.db stats
-nova watcher stop                  Stop all watchers
-
-nova run <harness>                 Run a harness end-to-end
-nova run <harness> --resume        Resume from last checkpoint
-nova run <harness> --dry-run       Dry run (no LLM calls, no writes)
-nova run <harness> --provider <p>  Override LLM provider (openai|anthropic|ollama|echo)
-nova run <harness> --context k=v   Pass context variables to the harness
-
-nova new <name>                    Scaffold a new harness (pipeline pattern)
-nova new <name> --pattern fanout   Scaffold with a specific pattern
-nova list                          List available harnesses
-nova evolution <harness>           Show run history and quality scores
-nova status <harness>              Show checkpoint state
-
-nova kb search <query>             Search the knowledge base
-nova kb list                       List all KB pages
-nova kb write <key> <file>         Write a file into the KB
-
-nova inspect build                 Build architecture graph (current repo)
-nova inspect report                Generate Markdown architecture report
-nova inspect hotspots              Show most-connected nodes
-nova inspect bridges               Show bridge nodes
-nova inspect path --from A --to B  Find path between two nodes
-```
-
----
-
-## LLM Providers
-
-Configure in `nova.yaml` or via environment variables:
-
-| Provider | `nova.yaml` | Environment variable |
-|---|---|---|
-| OpenAI | `provider: openai` | `NOVA_LLM_API_KEY=sk-...` |
-| Anthropic | `provider: anthropic` | `NOVA_LLM_API_KEY=sk-ant-...` |
-| Ollama | `provider: ollama` | *(no key needed)* |
-| Custom / Enterprise | `provider: custom`, `base_url: https://...` | `NOVA_LLM_API_KEY=...` |
-| Echo (testing) | `provider: echo` | *(no key needed)* |
-
-Example `nova.yaml`:
-
-```yaml
-llm:
-  provider: openai
-  model: gpt-4o
-  api_key: ""          # leave blank, use NOVA_LLM_API_KEY env var
-  max_tokens: 4096
-  temperature: 0.7
-
-notifier:
-  backend: telegram
-  token: ""            # NOVA_NOTIFIER_TOKEN
-
-publisher:
-  backend: local
-  output_dir: ./output
+# 6. Run autonomous engine
+python3 $HERMES_HOME/scripts/nova_autonomous_engine.py
 ```
 
 ---
@@ -345,112 +56,287 @@ publisher:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  CLI  nova run <harness> [--resume] [--dry-run] --context k=v       │
-└────────────────────────┬────────────────────────────────────────────┘
-                         │
-            ┌────────────▼────────────┐
-            │      Config Layer        │
-            │  nova.yaml + NOVA_* env  │
-            └────────────┬────────────┘
-                         │
-            ┌────────────▼────────────┐
-            │     Orchestrator         │
-            │  load → resume → run     │
-            │  → Evolution Log         │
-            └──┬──────────┬───────────┘
-               │          │
-    ┌──────────▼──┐  ┌────▼──────────┐
-    │   Harness   │  │   KB Layer    │
-    │  phases[]   │  │  brain.db     │
-    └──────┬──────┘  │  kb/ pages    │
-           │         │  wiki/ synth  │
-    ┌──────▼──────────────────────────────┐
-    │           Phase Execution            │
-    │  llm    → LLMProvider.complete()     │
-    │  shell  → subprocess.run()           │
-    │  python → exec(inline code)          │
-    │                                      │
-    │  Quality Gate: score < threshold     │
-    │    → auto-retry (max_retries times)  │
-    │  RunBook: failure → recover rule     │
-    └─────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│  Autonomous Loop  (runs alongside harnesses, event-driven)          │
-│                                                                      │
-│  brain.db changes  →  BrainWatcher  →  learn / synthesize / dream   │
-│  kb/ changes       →  KBWatcher     →  embed / wiki / index         │
-│  POST /publish     →  HookServer    →  sync / geo_update            │
-└─────────────────────────────────────────────────────────────────────┘
+NOVA Architecture
+─────────────────────────────────────────────────────────
+                    ┌─────────────────┐
+                    │   Orchestrator  │  (Hermes Agent / LLM)
+                    │   (두뇌 — Brain) │
+                    └────────┬────────┘
+                             │ judges · decides · delegates
+               ┌─────────────┼────────────────┐
+               ▼             ▼                ▼
+       ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+       │  nova_dream  │ │nova_learn_   │ │nova_chain_   │
+       │  (판단 생성)  │ │engine(학습)  │ │engine(연결)  │
+       └──────┬───────┘ └──────┬───────┘ └──────┬───────┘
+              │                │                 │
+              └────────────────┼─────────────────┘
+                               ▼
+                    ┌─────────────────┐
+                    │  nova_brain.db  │  ← 기억 (Memory)
+                    │  pages / takes  │
+                    │  events / learn │
+                    └────────┬────────┘
+                             │ inotify CLOSE_WRITE
+                             ▼
+                    ┌─────────────────┐
+                    │nova_brain_watch │  ← 감시 (Watcher)
+                    │er.py            │
+                    └────────┬────────┘
+                             │ dispatches
+                    ┌────────┴────────┐
+              agents react immediately
 ```
 
 ---
 
-## Repository Structure
+## Full Agent List (36 agents)
+
+### Core Brain Agents — `nova/agents/bin/`
+
+| Agent | Role |
+|-------|------|
+| `nova_brain.py` | DB CRUD, embedding search, index-all |
+| `nova_brain_cli.py` | CLI (takes add, pages search, health) |
+| `nova_brain_embed.py` | Vector embedding similarity search |
+| `nova_brain_hook.py` | DB change hook trigger |
+| `nova_brain_schema.py` | Schema init / migration |
+| `nova_brain_synthesize.py` | Synthesize takes → high-level judgment |
+| `nova_calibration.py` | Auto-calibration (weight tuning) |
+| `nova_codex_gate.py` | Code execution delegation gate |
+| `nova_doctor.py` | System health diagnosis |
+| `nova_dream.py` | Generate dream takes (top-level insight) |
+| `nova_emotional.py` | Tone / emotional layer |
+| `nova_kb_claim_extract.py` | Extract claims/facts from KB |
+| `nova_kb_sync.py` | KB ↔ nova_brain.db sync |
+| `nova_learn_harvester.py` | nova_learn → KB conversion |
+| `nova_llm.py` | LLM abstraction layer |
+| `nova_migrate_ct.py` | DB migration utility |
+| `nova_on_done_takes.py` | Post-takes completion hook |
+| `nova_search.py` | Unified pages/takes search |
+| `nova_takes_agent.py` | Takes autonomous agent (HIGH priority) |
+| `nova_wiki_synthesize.py` | Auto wiki synthesis |
+
+### Autonomous Engine Agents — `nova/agents/scripts/`
+
+| Agent | Role |
+|-------|------|
+| `nova_brain_watcher.py` | **Core** — inotify event engine |
+| `nova_autonomous_engine.py` | Full autonomy pipeline (5 phases) |
+| `nova_chain_engine.py` | Agent-to-agent signal relay |
+| `nova_learn_engine.py` | Learning pipeline |
+| `nova_resource_collector.py` | External resource collection |
+| `nova_hermes_briefing.py` | Session start health briefing |
+| `nova_phase0.py` | First-run initialization |
+| `nova_growth_tracker.py` | Growth metric tracking |
+| `nova_kanban_hook.py` | Kanban task completion hook |
+| `nova_resource_updater.py` | Resource update agent |
+| `nova_brain_watchdog.py` | DB health watchdog |
+| `nova_autonomous_loop.py` | Simple loop (dev/test) |
+| `nova_autonomous_engine_daemon.py` | Daemon wrapper |
+| `nova_db_status.py` | Quick DB status check |
+| `nova_kb_sync.py` | Scripts-side KB sync |
+| `nova_codex_gate.py` | Scripts-side code gate |
+
+---
+
+## nova_brain.db — Memory Schema
+
+```sql
+-- Judgments and insights
+takes (id, agent, take, context, importance, category, created_at)
+
+-- Knowledge pages
+pages (id, path, title, content, category, weight, auto_link, created_at)
+
+-- Event bus
+hermes_events (id, event_type, payload, source, processed, created_at)
+
+-- Learning feed
+nova_learn (id, source, content, quality_score, created_at)
+```
+
+### KB Hierarchy (L1~L8)
 
 ```
-NOVA/
-├── nova/
-│   ├── core/        # Harness execution engine (orchestrator, checkpoint, evolution, config, kb)
-│   ├── watcher/     # Autonomous event loop (brain.py, kb.py, hook_server.py)
-│   ├── db/          # Brain database (BrainDB, SQLite DDL)
-│   ├── engine/      # Built-in reaction engines (dream, learn, synthesize, chain, fix_orphan, memory_slim)
-│   ├── wiki/        # Wiki synthesis (crosslink, stale, takes, lessons, index)
-│   ├── kb/          # Agent KB Pattern (BM25+vector search, embedding sync)
-│   ├── inspect/     # Architecture graph analysis
-│   ├── providers/   # LLM / Publisher / Notifier adapters
-│   └── cli/         # nova CLI (main.py)
-├── harnesses/       # Built-in examples: research, summarizer, data-pipeline
-├── examples/        # Python API examples + engine reference implementations
-├── tests/           # 82 tests (unit + integration)
-├── docs/
-│   ├── architecture.md
-│   └── guides/
-│       ├── quickstart.md              # Step-by-step first run
-│       ├── writing-harnesses.md       # Full harness YAML reference
-│       ├── providers.md               # LLM/notifier/publisher setup
-│       ├── quality-gates.md           # How quality scoring works
-│       ├── custom-provider.md         # Add your own LLM or publisher
-│       └── autonomous-event-loop.md   # Deep dive: event-driven autonomy
-└── nova.yaml        # Default config (edit this)
+L1 dream        Top-level insights (highest abstraction)
+L2 synthesize   Multi-takes synthesis
+L3 takes        Individual judgment records
+L4 learn        Raw learning data
+L5 kb           Markdown KB pages
+L6 wiki         Cross-linked concept wiki
+L7 resources    External collected data
+L8 chain        Agent chain execution logs
 ```
 
 ---
 
-## Development
+## Agent Profiles (SOUL.md)
+
+Each agent has a profile directory:
+
+```
+$HERMES_HOME/profiles/{agent-name}/
+  SOUL.md       Identity, role, tools, mission
+  harness.md    Task harness / prompt template
+  evolution.md  Learning history
+  config.yaml   LLM config (model, provider, api_key)
+```
+
+Example `SOUL.md`:
+
+```markdown
+# Nova Research Agent
+
+role: researcher
+specialty: web research, arxiv, KB building
+tools: [web_search, web_extract, read_file, write_file]
+
+## Mission
+Accumulate knowledge in KB and supply learning data to nova_brain.db.
+
+## Principles
+1. Verify before storing — no hallucinated facts in KB
+2. Every session ends with a takes entry
+3. Cross-link related KB pages
+```
+
+---
+
+## Workflow — KB Auto-Pipeline
+
+```
+External trigger (cron / LLM / hook)
+    ↓
+resource_collector.py  →  외부 데이터 수집
+    ↓
+learn_engine.py        →  nova_learn에 저장
+    ↓
+nova_brain_watcher     →  learn-done 이벤트 감지
+    ↓
+learn_harvester.py     →  nova_learn → KB 변환
+    ↓
+wiki_synthesize.py     →  KB 교차연결 + wiki 생성
+    ↓
+brain_synthesize.py    →  wiki → takes 합성
+    ↓
+dream.py               →  takes → dream (최고수준 판단)
+    ↓
+nova_brain.db          →  기억 축적 완료
+```
+
+---
+
+## Running 24/7 (systemd)
+
+```ini
+# /etc/systemd/system/nova-watcher.service
+[Unit]
+Description=NOVA Brain Watcher
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Environment=HERMES_HOME=/home/YOUR_USER/.hermes
+ExecStart=/usr/bin/python3 /home/YOUR_USER/.hermes/scripts/nova_brain_watcher.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-git clone https://github.com/noivan0/NOVA.git
-cd NOVA
-pip install -e ".[dev]"
-
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/unit/test_engines.py -v
-
-# Run with coverage
-pytest --cov=nova --cov-report=term-missing
+sudo systemctl enable nova-watcher
+sudo systemctl start nova-watcher
+sudo systemctl status nova-watcher
 ```
-
-Requirements: Python 3.10+. Core dependency: `pyyaml` only. All LLM SDKs are optional extras.
 
 ---
 
-## Contributing
+## Environment Variables
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, coding style, and PR process.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HERMES_HOME` | `~/.hermes` | Root directory for all NOVA data |
+| `HERMES_API_KEY` | — | LLM API key |
+| `HERMES_BASE_URL` | `https://api.openai.com/v1` | LLM endpoint |
+| `HERMES_MODEL` | `gpt-4o` | Default model |
+| `TELEGRAM_BOT_TOKEN` | — | Optional: Telegram notifications |
+| `OPENAI_API_KEY` | — | Optional: Codex gate |
 
-Quick rules:
-- All tests must pass (`pytest`)
-- Add tests for new features
-- No hardcoded paths or credentials
-- Keep `nova.yaml` provider as `echo` (CI runs without an API key)
+---
+
+## Directory Layout
+
+```
+$HERMES_HOME/
+  nova_brain.db          Main memory database
+  .env                   API keys and config
+  bin/                   Core brain agents (20 files)
+  scripts/               Autonomous engine agents (16 py + 9 sh)
+  kb/                    Markdown knowledge base
+    config/
+    agents/
+    projects/
+    nova/learnings/
+    audit_loop/
+  wiki/                  Cross-linked concept wiki
+  profiles/              Agent SOUL.md directories
+  logs/                  Runtime logs
+  kanban/                Task boards
+  ipc/                   Inter-agent communication
+```
+
+---
+
+## Built-in OSS Engines (nova/engine/)
+
+The `nova/` package ships a clean Python API for programmatic use:
+
+```python
+from nova.engine.dream import DreamEngine
+from nova.engine.learn import LearnEngine
+from nova.engine.chain import ChainEngine
+from nova.db.brain import NovaBrain
+from nova.watcher.brain import BrainWatcher
+
+# Initialize brain
+brain = NovaBrain()
+
+# Start watcher
+watcher = BrainWatcher(brain)
+watcher.start()
+```
+
+---
+
+## Guides
+
+- [Quickstart](docs/guides/quickstart.md)
+- [Full Autonomy Architecture](docs/guides/full-autonomy.md)
+- [Writing Harnesses](docs/guides/writing-harnesses.md)
+- [Custom Providers](docs/guides/custom-provider.md)
+- [Quality Gates](docs/guides/quality-gates.md)
+- [Autonomous Event Loop](docs/guides/autonomous-event-loop.md)
+
+---
+
+## Philosophy
+
+> NOVA is not woken by timers. It is woken by memory.
+>
+> When memory changes → agents react.
+> When agents act → memory changes.
+> When memory grows → judgments improve.
+>
+> This is the cycle. No cron. No polling. Just signal and response.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE)
+
+Built with [Hermes Agent](https://hermes-agent.nousresearch.com) · Powered by [Nous Research](https://nousresearch.com)
