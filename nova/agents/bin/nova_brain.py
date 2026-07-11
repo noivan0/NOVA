@@ -207,8 +207,8 @@ def _parse_takes(text: str) -> list:
 
 
 # ── 청킹 ─────────────────────────────────────────
-def chunk_text(text: str, section: str, max_chars: int = MAX_CHUNK_CHARS) -> list:
-    """단락 단위 청킹"""
+def chunk_text(text: str, section: str, max_chars: int = MAX_CHUNK_CHARS, min_chars: int = 150) -> list:
+    """단락 단위 청킹 (min_chars 미달 chunk는 이전 chunk에 합치거나 제거)"""
     if not text:
         return []
     paragraphs = re.split(r"\n{2,}", text)
@@ -216,12 +216,25 @@ def chunk_text(text: str, section: str, max_chars: int = MAX_CHUNK_CHARS) -> lis
     current = ""
     for para in paragraphs:
         if len(current) + len(para) + 2 > max_chars and current:
-            chunks.append({"section": section, "content": current.strip()})
-            current = para
+            stripped = current.strip()
+            if len(stripped) >= min_chars:
+                chunks.append({"section": section, "content": stripped})
+                current = para
+            else:
+                # min_chars 미달: 이전 chunk에 합치거나 계속 누적
+                if chunks:
+                    chunks[-1]["content"] = chunks[-1]["content"] + "\n\n" + stripped
+                    current = para
+                else:
+                    current = current + "\n\n" + para if current else para
         else:
             current = current + "\n\n" + para if current else para
     if current.strip():
-        chunks.append({"section": section, "content": current.strip()})
+        stripped = current.strip()
+        if len(stripped) >= min_chars:
+            chunks.append({"section": section, "content": stripped})
+        elif chunks:  # 짧으면 이전 chunk에 합치기
+            chunks[-1]["content"] = chunks[-1]["content"] + "\n" + stripped
     return chunks
 
 
@@ -351,7 +364,8 @@ class NovaBrain:
         return True
 
     # ── 벡터 검색 ─────────────────────────────────
-    def index_kb_file_abs(self, abs_path: str, rel_path: str, embed: bool = True) -> bool:
+    def index_kb_file_abs(self, abs_path: str, rel_path: str, embed: bool = True,
+                          agent_hint: Optional[str] = None) -> bool:
         """절대 경로 + 상대 경로를 받아 nova_brain.db에 인덱싱 (다중 KB 루트 지원)"""
         p = Path(abs_path)
         if not p.exists():
@@ -359,6 +373,11 @@ class NovaBrain:
         parsed = parse_kb_file(p)
         if not parsed:
             return False
+
+        # BUG-HIGH-3: frontmatter에 agent 없으면 agent_hint 사용
+        if parsed.get("agent") is None and agent_hint:
+            parsed["agent"] = agent_hint
+
         content_all = parsed["compiled_truth"] + "\n" + parsed["timeline"]
         content_hash = hashlib.sha256(content_all.encode()).hexdigest()[:16]
         # F2 fix: path UNIQUE 충돌 방지 — 기존 page 행은 id가 달라도 path로 찾아서 그 id 사용
@@ -646,8 +665,8 @@ class NovaBrain:
                 # 이미 감지(open/dismissed)된 쌍은 스킵
                 existing = self.conn.execute("""
                     SELECT id FROM contradictions
-                    WHERE (page_id_a=? AND page_id_b=?)
-                       OR (page_id_a=? AND page_id_b=?)
+                    WHERE (take_a=? AND take_b=?)
+                       OR (take_a=? AND take_b=?)
                 """, (p1["id"], p2["id"], p2["id"], p1["id"])).fetchone()
                 if existing:
                     continue
@@ -685,7 +704,7 @@ class NovaBrain:
 
                         self.conn.execute("""
                             INSERT OR IGNORE INTO contradictions
-                            (id, page_id_a, page_id_b, claim_a, claim_b, severity, detected_at)
+                            (id, take_a, take_b, status, created_at)
                             VALUES (?,?,?,?,?,?,?)
                         """, (cid, p1["id"], p2["id"],
                               ct1[:200], ct2[:200], severity, now))
@@ -770,13 +789,20 @@ class NovaBrain:
             "thresholds_crossed": json.dumps(thresholds_crossed),
         }
 
+        # BUG-HEALTH-EVOLUTION 수정: 직전 health와의 score_overall 변화량 계산
+        # score_evolution = 현재 score_overall - 이전 score_overall (양수=개선, 음수=악화)
+        prev_row = self.conn.execute(
+            "SELECT score_overall FROM brain_health ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        result["score_evolution"] = round(score_overall - (prev_row[0] if prev_row else score_overall), 2)
+
         self.conn.execute("""
             INSERT INTO brain_health
             (measured_at, measured_by, score_overall, score_coverage, score_freshness,
-             score_consistency, score_depth, total_pages, pages_with_takes,
+             score_consistency, score_depth, score_evolution, total_pages, pages_with_takes,
              open_contradictions, orphan_pages, stale_pages, thresholds_crossed)
             VALUES (:measured_at,:measured_by,:score_overall,:score_coverage,:score_freshness,
-                    :score_consistency,:score_depth,:total_pages,:pages_with_takes,
+                    :score_consistency,:score_depth,:score_evolution,:total_pages,:pages_with_takes,
                     :open_contradictions,:orphan_pages,:stale_pages,:thresholds_crossed)
         """, result)
         self.conn.commit()

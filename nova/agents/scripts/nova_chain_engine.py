@@ -1,5 +1,5 @@
-import os
 #!/usr/bin/env python3
+import os
 """
 NOVA 하네스 체인 엔진 v3.0
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -18,12 +18,110 @@ import os as _os
 from pathlib import Path as _Path
 _HERMES_HOME = _os.environ.get("HERMES_HOME", str(_Path.home() / ".hermes"))
 
-import json, re, subprocess, time, os, fcntl, sqlite3
-from datetime import datetime
+import json, re, subprocess, sys, time, os, fcntl, sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ── 단일 실행 보장 (brain_watcher ↔ autonomous_engine 동시 트리거 방지)
 CHAIN_LOCK_FILE = "/tmp/nova_chain.lock"
+
+# ============================================================
+# 에이전트 → NOVA Harness 매핑
+# ready 상태 태스크의 assignee가 이 맵에 있으면 harness 자동 실행
+# ============================================================
+HARNESS_AGENTS = {
+    # 자율 지식 탐구
+    "nova-research":    "research",
+    "nova-autoplan":    "research",
+    # 자율 코드 구현
+    "nova-dev":         "code_implement",
+    # 자율 코드 리뷰 (security+quality 병렬)
+    "nova-review":      "code_review",
+    # 자율 QA (pytest 실행 + LLM 분석)
+    "nova-qa":          "qa",
+    # 자율 GO/NO-GO 판정
+    "nova-checkpoint":  "go_nogo",
+    # 자율 보안 최종 승인 (OWASP 평가)
+    "nova-cso":         "security_sign_off",
+    # 자율 KPI 평가 (brain_health 기반)
+    "nova-evaluator":   "kpi_evaluate",
+    # 자율 배포 (NOVA_DEPLOY_CMD / DEPLOY_HEALTH_URL 기반)
+    "nova-ship":        "ship",
+    # 자율 카나리 모니터링 (CANARY_METRICS_CMD 기반)
+    "nova-canary":      "canary",
+    # 자율 헬스 모니터링 (brain.db health + DEPLOY_HEALTH_URL)
+    "nova-health":      "health",
+    # 자율 회고 (brain.db takes + health 기반)
+    "nova-retro":       "retro",
+    # 자율 지식 학습 (learn_engine + takes 패턴)
+    "nova-learn":       "learn",
+    # 자율 문서화 (코드 아티팩트 → API 문서 + 릴리즈 노트)
+    "nova-document":    "document_gen",
+    # 자율 문서 배포 + 루프 재진입 트리거
+    "nova-document-release": "document_release",
+    # 시스템 자가 감사 — 매 스프린트 완주 후 NOVA 코드베이스 무결성 점검
+    # AUDIT_PASS: 정상 재진입 / AUDIT_ISSUES: 이슈 handoff로 다음 스프린트에 반영
+    "nova-sysaudit":         "system_audit",
+    # 자율 장애 조사 (5 Whys RCA) — CHAIN_FAIL 폴백 에이전트
+    "nova-investigate":  "investigate",
+    # ── 사이드체인 에이전트 (5개) ──────────────────────────────
+    "nova-marketing":    "go_nogo",           # 시장 가치 검증
+    "nova-strategy":     "document_gen",      # 전략 문서
+    "nova-careful":      "security_sign_off", # 위험 분석
+    "nova-validator":    "qa",                # 통합 검증
+    "nova-benchmark":    "kpi_evaluate",      # 성능 실측
+}
+
+def _execute_harness_for_agent(agent: str, context: dict = None) -> bool:
+    harness_name = HARNESS_AGENTS.get(agent)
+    if not harness_name:
+        return False
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        nova_src   = _Path.home() / "nova"
+        hermes_bin = _Path(os.environ.get("HERMES_HOME", str(_Path.home()/".hermes"))) / "bin"
+        for p in (str(hermes_bin), str(nova_src)):
+            if p not in _sys.path:
+                _sys.path.insert(0, p)
+        from nova.core.config import load_config
+        from nova.core.harness import HarnessLoader
+        from nova.core.orchestrator import Orchestrator
+        nova_home = _Path(os.environ.get("NOVA_HOME", str(_Path.home()/".nova")))
+        cfg = load_config(str(nova_home/"nova.yaml"))
+        cfg.harnesses_dir = str(_Path(cfg.harnesses_dir).expanduser())
+        cfg.workspace     = str(_Path(cfg.workspace).expanduser())
+        loader  = HarnessLoader(cfg.harnesses_dir)
+        harness = loader.load(harness_name)
+        orch    = Orchestrator(cfg)
+        ok      = orch.run(harness, context=context or {}, resume=False)
+        log(f"  [HARNESS] {agent} → {harness_name}: {'OK' if ok else 'FAIL'}")
+        # BUG-D3 수정: harness 성공 후 kb_sync로 brain.db 인덱싱 (BUG-NEW-2: returncode 체크 추가)
+        if ok:
+            hermes_home = _Path(os.environ.get("HERMES_HOME", str(_Path.home()/".hermes")))
+            hermes_bin  = hermes_home / "bin"
+            nova_src    = _Path.home() / "nova"
+            # sqlite_vec가 설치된 python3 우선 (Hermes venv에는 sqlite_vec 없음 — agent_worker 동일 방식)
+            for _py in ("/usr/bin/python3", "/usr/local/bin/python3", _sys.executable):
+                if not _Path(_py).exists():
+                    continue
+                sync_r = subprocess.run(
+                    [_py, str(hermes_bin / "nova_kb_sync.py")],
+                    env={**os.environ,
+                         "HERMES_HOME": str(hermes_home),
+                         "NOVA_HOME":   str(nova_home),
+                         "PYTHONPATH":  str(hermes_bin)+":"+str(nova_src)},
+                    capture_output=True, text=True, timeout=60,
+                )
+                if sync_r.returncode == 0:
+                    break
+                if "sqlite_vec" not in sync_r.stderr:
+                    log(f"  [kb_sync] FAIL rc={sync_r.returncode} {(sync_r.stderr or sync_r.stdout)[:80]}")
+                    break
+        return ok
+    except Exception as e:
+        log(f"  [HARNESS-ERR] {agent} → {e}")
+        return False
 
 # ============================================================
 # 9단계 정방향 순서 (정방향 건너뛰기 절대 금지)
@@ -43,6 +141,7 @@ STAGE_ORDER = [
     "nova-learn",        # 9-LEARN
     "nova-document",     # POST-LEARN
     "nova-document-release",  # POST-LEARN
+    "nova-sysaudit",          # SYSTEM-AUDIT — 매 라운드 완주 후 자가 점검
 ]
 
 # ============================================================
@@ -55,23 +154,55 @@ CHAIN_DONE = {
     "nova-cso":               "nova-qa",
     "nova-qa":                "nova-ship",
     "nova-ship":              "nova-checkpoint",
-    "nova-checkpoint":        "nova-canary",
-    "nova-canary":            "nova-health",
-    "nova-health":            "nova-evaluator",
-    "nova-evaluator":         "nova-retro",
-    "nova-retro":             "nova-learn",
+    "nova-checkpoint":        "nova-canary",   # 기본 체인 (CHAIN_FORK가 우선 적용)
+    # canary/health/retro/document → JOIN 처리 (CHAIN_JOIN)
+    # CHAIN_DONE에서 제거해 FORK 분기 에이전트가 독자적으로 다음 에이전트를 생성하지 않도록
+    "nova-canary":            "",   # JOIN: canary+health 둘 다 완료 → evaluator
+    "nova-health":            "",   # JOIN: 위와 동일
+    "nova-evaluator":         "nova-retro",   # 기본 체인 (CHAIN_FORK가 우선)
+    "nova-retro":             "",   # JOIN: retro+document 둘 다 완료 → document-release
+    "nova-document":          "",   # JOIN: 위와 동일
     "nova-learn":             "nova-document",
-    "nova-document":          "nova-document-release",
-    "nova-document-release":  "nova-autoplan",   # ← 라운드 완주 → 새 스프린트
+    "nova-document-release":  "nova-sysaudit",  # ← 라운드 완주 → 시스템 감사 → 새 스프린트
+
+    # 시스템 자가 감사: document-release 완료 후 시스템 상태 점검
+    # AUDIT_PASS → nova-autoplan 재진입 (정상 스프린트)
+    # AUDIT_ISSUES → nova-dev에 수정 지시 (시스템 버그 수정 스프린트)
+    "nova-sysaudit":          "nova-autoplan",
 
     # 사이드 체인
     "nova-research":          "nova-strategy",
     "nova-marketing":         "nova-strategy",
     "nova-strategy":          "nova-autoplan",
-    "nova-investigate":       "nova-dev",         # 조사 완료 → 재구현 (역방향)
+    "nova-investigate":       "nova-dev",
     "nova-careful":           "nova-dev",
     "nova-validator":         "nova-ship",
     "nova-benchmark":         "nova-evaluator",
+}
+
+# ============================================================
+# 병렬 분기 체인 — 한 에이전트 완료 시 여러 에이전트를 동시 생성
+# 이 테이블에 있는 에이전트는 CHAIN_DONE 대신 CHAIN_FORK 사용
+# ============================================================
+CHAIN_FORK: dict[str, list[str]] = {
+    # nova-checkpoint 완료 → canary + health 동시 생성 (병렬 모니터링)
+    "nova-checkpoint": ["nova-canary", "nova-health"],
+    # nova-evaluator 완료 → retro + learn 병렬 생성
+    # nova-learn 완료 → CHAIN_DONE("nova-document") → nova-document 생성
+    # nova-retro + nova-document 완료 → JOIN → nova-document-release
+    "nova-evaluator":  ["nova-retro", "nova-learn"],
+}
+
+# ============================================================
+# CHAIN_JOIN — FORK 분기 합류 테이블
+# {합류 에이전트: [반드시 완료돼야 할 에이전트 목록]}
+# 이 목록의 에이전트가 모두 done 상태일 때만 합류 에이전트 생성
+# ============================================================
+CHAIN_JOIN: dict[str, list[str]] = {
+    # canary + health 둘 다 완료 → evaluator 합류
+    "nova-evaluator":         ["nova-canary", "nova-health"],
+    # retro + document 둘 다 완료 → document-release 합류
+    "nova-document-release":  ["nova-retro",  "nova-document"],
 }
 
 # ============================================================
@@ -88,9 +219,15 @@ BACKWARD_JUMP = {
     "nova-checkpoint": ("nova-cso",      "GO-NOGO 실패 — 보안/QA 재확인 후 CHECKPOINT 재시도"),
     "nova-canary":     ("nova-dev",      "Canary 이상 — 코드 롤백 후 전 단계 재순환"),
     "nova-health":     ("nova-dev",      "헬스 이상 — 긴급 패치 후 REVIEW부터 재시작"),
-    "nova-evaluator":  ("nova-retro",    "KPI 미달 — 회고에서 원인 분석 후 전략 수정"),
+    "nova-evaluator":  ("nova-checkpoint", "KPI 미달 — 체크포인트로 돌아가 기준 재설정 후 전략 수정"),
     "nova-document":   ("nova-dev",      "문서 생성 실패 — 코드/API 수정 후 재시도"),
     "nova-ship":       ("nova-qa",         "배포 실패 — 코드/스크립트 수정 후 QA→SECURITY→CHECKPOINT 재통과 필수"),
+    # ── 사이드체인 에이전트 역방향 ────────────────────────────────
+    "nova-marketing":  ("nova-autoplan",  "시장 검증 실패 — 전략 수정된 후 재시도"),
+    "nova-strategy":   ("nova-autoplan",  "전략 수립 실패 — 재기획 후 재시도"),
+    "nova-careful":    ("nova-autoplan",  "위험 감지 — 기획 단계에서 순환 재실행"),
+    "nova-validator":  ("nova-dev",       "검증 실패 — 코드 수정 후 재검증"),
+    "nova-benchmark":  ("nova-dev",       "KPI 미달 — 코드 개선 후 재비교"),
 }
 
 # ============================================================
@@ -114,13 +251,54 @@ DOD_REQUIRED_KEYWORDS = {
         "passed",               # 테스트 통과
         r"(?:failed:\s*0|0\s+failed)",  # pytest: '0 failed' / Jest: 'failed: 0' 모두 허용
     ],
-    "nova-ship": [
-        "HTTP 200",        # 헬스체크 통과
-        "deploy",          # 배포 수행
-    ],
     "nova-checkpoint": [
-        r"(?<![-a-z])go(?![-a-z])",  # GO 판정 — NO-GO 오매칭 방지 (앞뒤 대시/알파벳 없을 때만)
+        r"(?:(?<![-a-z])go(?![-a-z])|lgtm)",  # GO 또는 LGTM 판정 — go_nogo harness 연동
     ],
+    # BUG-NEW-3 수정: nova-evaluator DoD 추가 → BACKWARD_JUMP nova-checkpoint 발동 가능
+    "nova-evaluator": [
+        r"KPI_(?:PASS|FAIL)",   # kpi_evaluate harness 출력 키워드
+    ],
+    # nova-ship: ship harness write_dod_summary 출력 키워드
+    "nova-ship": [
+        "HTTP 200",     # 헬스체크 통과
+        "deploy",       # 배포 수행
+    ],
+    # nova-canary: canary harness write_dod_summary 출력 키워드
+    "nova-canary": [
+        r"CANARY_(?:OK|ANOMALY)",   # canary 판정
+    ],
+    # nova-health: health harness write_dod_summary 출력 키워드
+    "nova-health": [
+        r"HEALTH_(?:OK|DEGRADED)",  # health 판정
+    ],
+    # nova-retro: generate_retro llm 출력 (report.md)
+    "nova-retro": [
+        r"(?:What Went Well|\ud68c\uace0|\uac1c\uc120)",  # 회고 키워드 (영/한)
+    ],
+    # nova-learn: write_learn_summary llm 출력
+    "nova-learn": [
+        r"(?:Knowledge|learn|\ud559\uc2b5)",              # 학습 키워드
+    ],
+    # nova-document: write_dod_summary 출력 키워드
+    "nova-document": [
+        "document",     # 문서화 수행
+    ],
+    # nova-document-release: write_loop_summary 출력 키워드
+    "nova-document-release": [
+        "release",      # 릴리즈 수행
+        "complete",     # 루프 완결
+    ],
+    # nova-sysaudit: system_audit harness write_audit_summary 출력 키워드
+    "nova-sysaudit": [
+        "system_audit",   # 감사 수행
+        r"AUDIT_(?:PASS|ISSUES)",  # 최종 판정 (PASS or ISSUES 모두 DoD 통과)
+    ],
+    # ── 사이드체인 에이전트 DoD ────────────────────────────────
+    "nova-marketing":  [r"(?:GO|LGTM|PASS|reject|no-go)"],
+    "nova-strategy":   ["document", "strategy"],
+    "nova-careful":    ["OWASP", r"CRITICAL[=:\s]\s*0"],
+    "nova-validator":  ["passed", r"(?:failed:\s*0|0\s+failed)"],
+    "nova-benchmark":  [r"KPI_(?:PASS|FAIL)"],
 }
 
 # ============================================================
@@ -140,6 +318,7 @@ CHAIN_FAIL = {
     "nova-learn":             "nova-investigate",
     "nova-document":          "nova-investigate",
     "nova-document-release":  "nova-investigate",
+    "nova-sysaudit":          "nova-investigate",  # 감사 실패 → 5Whys 조사
     "nova-autoplan":          "nova-investigate",
     "nova-research":          "nova-investigate",
     "nova-marketing":         "nova-investigate",
@@ -158,6 +337,11 @@ LOOP_DEPTH_MAX = 10
 # 없으면 기존 3개 앱 기본값 사용
 # ============================================================
 BOARDS_CONFIG = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "kanban/nova_boards.json"
+
+# PATH에 ~/.local/bin 추가 (hermes 명령이 여기에 있음 — subprocess 환경 보정)
+_local_bin = str(Path.home() / ".local" / "bin")
+if _local_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _local_bin + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
 
 def load_boards() -> list[str]:
     if BOARDS_CONFIG.exists():
@@ -323,12 +507,10 @@ def check_dod(task: dict, board: str | None = None) -> tuple[bool, list[str]]:
     search_text = evidence_text.lower()
 
     def _match(kw: str, text: str) -> bool:
-        # r"..." 형태(regex 패턴)는 re.search, 일반 문자열은 단순 포함 체크
-        if kw.startswith("r\"") or kw.startswith("r'"):
-            pattern = kw[2:-1]
-            return bool(re.search(pattern, text, re.IGNORECASE))
-        elif any(c in kw for c in r"\.^$*+?{}[]|()"):
-            # regex 특수문자 포함 시 regex로 처리
+        # 특수문자 포함 키워드는 regex, 그 외는 단순 포함 체크
+        # 주: Python dict에 저장된 r"..." 리터럴은 prefix 없이 저장되므로
+        #     특수문자 체크(elif)로 자동 처리됨 — r"..." 분기는 dead code
+        if any(c in kw for c in r"\.^$*+?{}[]|()"):
             try:
                 return bool(re.search(kw, text, re.IGNORECASE))
             except re.error:
@@ -353,10 +535,28 @@ def is_backward_allowed(from_agent: str, to_agent: str) -> bool:
 
 
 def detect_loop(tasks: list, candidate_agent: str) -> bool:
+    """무한루프 감지.
+
+    /roop는 max_sprints=0 무제한이 기본 설계다.
+    nova-autoplan/nova-dev 같은 메인 체인 에이전트는 스프린트마다 반복되는 것이 정상.
+    따라서 단순 완료 횟수로 루프를 판정하면 정상 동작을 차단한다.
+
+    실제 루프 감지 기준:
+      - 같은 태스크 계보(lineage) 안에서 동일 에이전트가 LOOP_DEPTH_MAX회 연속 역방향
+      - 즉 짧은 시간 안에 같은 에이전트가 fail→retry→fail→retry 를 반복하는 경우만 감지
+      - 정방향 체인(스프린트 전진)은 루프가 아님
+    """
     if candidate_agent == "nova-investigate":
         return False
-    recent = [t.get("assignee") for t in tasks[-LOOP_DEPTH_MAX:]]
-    return sum(1 for a in recent if a == candidate_agent) >= LOOP_DEPTH_MAX
+
+    # 역방향(BACKWARD_JUMP) 태스크만 카운팅 — 정방향 스프린트 진행은 제외
+    # title에 "[역방향↩]" 또는 "[LOOP]" 패턴이 있는 것만 역방향 태스크
+    backward = [t for t in tasks
+                if t.get("assignee") == candidate_agent
+                and (str(t.get("title", "")).startswith("[역방향↩]")
+                     or str(t.get("title", "")).startswith("[LOOP]"))
+                and t.get("status") in ("done", "failed", "blocked", "ready")]
+    return len(backward) >= LOOP_DEPTH_MAX
 
 
 ASSIGN_RULES = [
@@ -389,16 +589,10 @@ def auto_assign_agent(title: str, body: str) -> str | None:
 def run_chain(board: str):
     log(f"--- [{board}] 체인 점검 (v3.0) ---")
 
-    switch_r = subprocess.run(
-        ["hermes", "kanban", "boards", "switch", board],
-        capture_output=True, text=True
-    )
-    if switch_r.returncode != 0:
-        log(f"  [ERROR] 보드 전환 실패: {board}")
-        return
-
+    # BUG-C5 수정: switch+list 방식 → --board 직접 파라미터로 교체
+    # switch는 별도 subprocess라 list subprocess에서 효과 없음
     list_r = subprocess.run(
-        ["hermes", "kanban", "list", "--json"],
+        ["hermes", "kanban", "--board", board, "list", "--json"],
         capture_output=True, text=True
     )
     if list_r.returncode != 0 or not list_r.stdout.strip():
@@ -413,7 +607,8 @@ def run_chain(board: str):
 
     now = time.time()
     done_tasks    = [t for t in tasks if t.get("status") == "done"]
-    failed_tasks  = [t for t in tasks if t.get("status") in ("failed", "blocked", "cancelled")]
+    # cancelled는 수동 중단 의사 표현 — 자동 역방향 점프 대상 제외 (BUG-B1 수정)
+    failed_tasks  = [t for t in tasks if t.get("status") in ("failed", "blocked")]
     running_tasks = [t for t in tasks if t.get("status") == "running"]
 
     # "현재 처리 중"인 에이전트만 중복 방지 대상
@@ -429,15 +624,107 @@ def run_chain(board: str):
 
     spawned = 0
 
-    # ── ① done → DoD 게이트 → 정방향 next_agent
+    # ── ① done → DoD 게이트 → 정방향 next_agent (CHAIN_FORK 병렬 분기 우선)
     for task in done_tasks:
         agent   = task.get("assignee", "")
         task_id = task.get("id", "")
         title   = task.get("title", "")
 
+        # ── CHAIN_FORK 병렬 분기: 단일 에이전트 완료 → 여러 에이전트 동시 생성
+        fork_targets = CHAIN_FORK.get(agent)
+        if fork_targets:
+            new_forks = [ag for ag in fork_targets if ag not in all_active_assignees
+                         and (task_id, ag) not in child_exists_set]
+            if new_forks:
+                log(f"  [FORK→] {agent} → 병렬 분기: {new_forks}")
+                for fork_ag in new_forks:
+                    fork_title = f"[Fork→] {title[:45]} / {fork_ag}"
+                    fork_body  = (
+                        f"NOVA 병렬 분기 체인 (CHAIN_FORK)\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"트리거 에이전트: {agent} (완료)\n"
+                        f"현재 에이전트: {fork_ag} (병렬 실행)\n"
+                        f"파트너 에이전트: {[a for a in fork_targets if a != fork_ag]}\n"
+                        f"상위 태스크: {task_id}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"★ DoD 키워드: {DOD_REQUIRED_KEYWORDS.get(fork_ag, ['해당 없음'])}\n"
+                        f"생성: {datetime.now().isoformat()}"
+                    )
+                    cmd = ["hermes", "kanban", "--board", board, "create", fork_title,
+                           "--assignee", fork_ag, "--parent", task_id, "--body", fork_body]
+                    r = subprocess.run(cmd, capture_output=True, text=True)
+                    if r.returncode == 0:
+                        log(f"  [FORK ✓] {fork_ag} 생성 (병렬)")
+                        spawned += 1
+                        all_active_assignees.add(fork_ag)
+                        child_exists_set.add((task_id, fork_ag))
+                        record_chain_step(board, agent, fork_ag, task_id, "fork")
+            continue  # FORK 처리했으면 CHAIN_DONE 스킵
+
+        # ── CHAIN_JOIN 합류 처리: 여러 에이전트가 모두 완료됐을 때 합류 에이전트 생성
+        # done_assignees: 이 board에서 done 상태인 에이전트 집합
+        done_assignees = {t.get("assignee", "") for t in tasks if t.get("status") == "done"}
+        for join_ag, prereqs in CHAIN_JOIN.items():
+            if join_ag in all_active_assignees:
+                continue
+            if agent not in prereqs:
+                continue
+            # 전제 에이전트 모두 done인지 확인
+            if all(p in done_assignees for p in prereqs):
+                # child_exists_set으로 1차 방어 (BUG-A2 수정: FORK와 동일 방식)
+                if (task_id, join_ag) in child_exists_set:
+                    continue
+                # 이미 join 태스크가 없는 경우에만 생성 (archived 포함)
+                existing_join = [t for t in tasks if t.get("assignee") == join_ag
+                                 and t.get("status") in ACTIVE_STATUSES | {"done", "archived"}]
+                if not existing_join:
+                    join_title = f"[Join→] {'+'.join(prereqs)} → {join_ag}"
+                    join_body  = (
+                        f"NOVA 병렬 합류 체인 (CHAIN_JOIN)\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"완료된 분기: {prereqs}\n"
+                        f"합류 에이전트: {join_ag}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"★ DoD 키워드: {DOD_REQUIRED_KEYWORDS.get(join_ag, ['해당 없음'])}\n"
+                        f"생성: {datetime.now().isoformat()}"
+                    )
+                    cmd = ["hermes", "kanban", "--board", board, "create", join_title,
+                           "--assignee", join_ag, "--body", join_body]
+                    r = subprocess.run(cmd, capture_output=True, text=True)
+                    if r.returncode == 0:
+                        log(f"  [JOIN ✓] {prereqs} 완료 → {join_ag} 합류 생성")
+                        spawned += 1
+                        all_active_assignees.add(join_ag)
+                        record_chain_step(board, "+".join(prereqs), join_ag, task_id, "join")
+
         next_ag = CHAIN_DONE.get(agent)
         if not next_ag:
             continue
+
+        # ── nova-sysaudit → nova-autoplan: KPI_PASS/max_sprints 체크 ──
+        # BUG-1 수정: 체인이 doc-release→sysaudit→autoplan으로 변경됨
+        # KPI_PASS 체크는 반드시 nova-autoplan 재진입 직전(nova-sysaudit→autoplan)에 있어야 함
+        if agent == "nova-sysaudit" and next_ag == "nova-autoplan":
+            _nova_home = Path(os.environ.get("NOVA_HOME", str(Path.home() / ".nova")))
+            # KPI_PASS 감지 → 루프 종료 (nova-autoplan 재생성 차단)
+            _kpi_rpt = _nova_home / "workspace" / "kpi_evaluate" / "kpi_report.md"
+            if _kpi_rpt.exists() and "KPI_PASS" in _kpi_rpt.read_text(errors="replace"):
+                log(f"  [ROOP COMPLETE] KPI_PASS 감지 — nova-autoplan 재진입 차단, 루프 종료")
+                continue
+            # max_sprints 체크
+            _state_f = _nova_home / "logs" / "roop_state.json"
+            if _state_f.exists():
+                try:
+                    _st = json.loads(_state_f.read_text())
+                    _max_s  = _st.get("max_sprints", 0)
+                    _sp_n   = _st.get("sprint", 1)
+                    if _max_s > 0 and _sp_n >= _max_s:
+                        log(f"  [ROOP] max_sprints({_max_s}) 도달 — 루프 종료")
+                        continue
+                    _st["sprint"] = _sp_n + 1
+                    _state_f.write_text(json.dumps(_st, ensure_ascii=False, indent=2))
+                except Exception:
+                    pass
 
         # 중복 방지: 현재 진행 중인 에이전트
         if next_ag in all_active_assignees:
@@ -643,8 +930,126 @@ def run_chain(board: str):
 
     log(f"  → [{board}] {spawned}개 체인/점프 처리 완료" if spawned else f"  → [{board}] 신규 체인 없음")
 
+    # ── ⑤ HARNESS_AGENTS: ready 태스크 → nova_orchestrator.py 통해 독립 subprocess 파견
+    # ★ BUG-F 수정: chain 실행 도중 생성된 ready 태스크를 포함하기 위해 kanban을 재조회
+    # (run_chain 시작 시점과 체인 처리 완료 시점의 태스크 목록이 다름)
+    fresh_r = subprocess.run(
+        ["hermes", "kanban", "--board", board, "list", "--json"],
+        capture_output=True, text=True
+    )
+    try:
+        fresh_tasks = json.loads(fresh_r.stdout) if fresh_r.returncode == 0 else tasks
+    except Exception:
+        fresh_tasks = tasks
 
-BRAIN_DB = f"{_HERMES_HOME}/nova_brain.db"
+    ready_harness_tasks = [t for t in fresh_tasks
+                           if t.get("status") == "ready"
+                           and t.get("assignee") in HARNESS_AGENTS]
+
+    if ready_harness_tasks:
+        orchestrator_py = Path(os.environ.get("HERMES_HOME",
+                               str(Path.home() / ".hermes"))) / "bin" / "nova_orchestrator.py"
+        _hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+        env_orch = {
+            **os.environ,
+            "HERMES_HOME": _hermes_home,
+            "NOVA_HOME":   os.environ.get("NOVA_HOME",   str(Path.home() / ".nova")),
+            # BUG-D3 수정: HERMES_HOME 환경변수 기준으로 PYTHONPATH 설정 (하드코딩 제거)
+            "PYTHONPATH":  str(Path(_hermes_home) / "bin") + ":" + str(Path.home() / "nova"),
+            # PATH에 ~/.local/bin 추가 (hermes 명령 위치)
+            "PATH": str(Path.home()/".local"/"bin") + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        }
+
+        agent_names = [t.get("assignee", "") for t in ready_harness_tasks]
+        log(f"  [DISPATCH→ORCH] {len(ready_harness_tasks)}개 에이전트 파견: {agent_names}")
+
+        # orchestrator --dispatch 호출: 내부에서 Popen 후 비데몬 스레드 감시
+        # --wait 로 모든 에이전트 완료까지 대기 (워커가 kanban 직접 처리)
+        r = subprocess.run(
+            [sys.executable, str(orchestrator_py),
+             "--dispatch", "--board", board, "--wait"],
+            capture_output=True, text=True,
+            timeout=3600,  # 최대 1시간 (harness 실행 시간 고려)
+            env=env_orch,
+        )
+
+        if r.returncode == 0:
+            try:
+                result = json.loads(r.stdout.strip().split("\n")[-1])
+                n = result.get("dispatched", 0)
+                log(f"  [ORCH ✓] {n}개 에이전트 완료 (kanban은 워커가 직접 처리)")
+            except Exception:
+                log(f"  [ORCH ✓] 오케스트레이터 완료")
+
+            # ★ BUG-INOTIFY-DEADEND 수정: orchestrator 완료 후 새로 생긴 ready tasks 재파견
+            # 체인 처리 도중 nova-sysaudit 등이 nova-autoplan을 ready로 만들면
+            # ⑤번 fresh_tasks는 이를 포함하지 않아 영구 미파견 상태가 됨
+            remaining_r = subprocess.run(
+                ["hermes", "kanban", "--board", board, "list", "--json"],
+                capture_output=True, text=True, timeout=10, env=env_orch
+            )
+            if remaining_r.returncode == 0 and remaining_r.stdout.strip():
+                try:
+                    remaining = json.loads(remaining_r.stdout)
+                    leftover = [t for t in remaining
+                                if t.get("status") == "ready"
+                                and t.get("assignee") in HARNESS_AGENTS]
+                    if leftover:
+                        log(f"  [ORCH-2ND] 신규 ready {len(leftover)}개 발견 → 2차 파견")
+                        orch2 = subprocess.run(
+                            [sys.executable, str(orchestrator_py),
+                             "--board", board, "--dispatch", "--wait"],
+                            env=env_orch, capture_output=True, text=True,
+                            timeout=300  # 2차 파견은 300초 제한 (1차 3600s와 합산 방지)
+                        )
+                        if orch2.returncode == 0:
+                            log(f"  [ORCH-2ND ✓] 2차 파견 완료")
+                        else:
+                            log(f"  [ORCH-2ND ERR] {orch2.stderr[:80]}")
+                except Exception as e2:
+                    log(f"  [ORCH-2ND] 재파견 오류: {e2}")
+        else:
+            log(f"  [ORCH ERR] 오케스트레이터 실패: {r.stderr[:120]}")
+            # Fallback: 기존 방식으로 직접 실행
+            log("  [FALLBACK] _execute_harness_for_agent 직접 실행")
+            for task in ready_harness_tasks:
+                ag  = task.get("assignee", "")
+                tid = task.get("id", "")
+                ttl = task.get("title", "")
+                ok_fb = _execute_harness_for_agent(ag, context={"topic": ttl[:60]})
+                if ok_fb:
+                    subprocess.run(["hermes", "kanban", "--board", board,
+                                    "complete", tid], capture_output=True, text=True)
+                else:
+                    subprocess.run(["hermes", "kanban", "--board", board,
+                                    "block", tid, f"{ag} harness 실패"],
+                                   capture_output=True, text=True)
+
+    # ── ⑥ BUG-C-1 수정: HARNESS_AGENTS 미등록 ready 태스크 passthrough 처리
+    #    nova-ship / nova-canary / nova-health 등 harness 없는 에이전트가
+    #    ready 상태일 때 영구 방치되는 문제 수정.
+    #    harness가 추가되면 HARNESS_AGENTS에 등록 → 이 블록은 자동으로 건너뜀.
+    STAGE_ORDER_SET = set(STAGE_ORDER)
+    passthrough_count = 0
+    for task in [t for t in tasks
+                 if t.get("status") == "ready"
+                 and t.get("assignee") not in HARNESS_AGENTS
+                 and t.get("assignee") in STAGE_ORDER_SET]:
+        agent   = task.get("assignee", "")
+        task_id = task.get("id", "")
+        title   = task.get("title", "")
+        log(f"  [PASSTHROUGH] {agent} harness 미구현 → 자동 complete 처리 (title={title[:40]})")
+        subprocess.run(
+            ["hermes", "kanban", "--board", board, "complete", task_id],
+            capture_output=True, text=True,
+        )
+        record_chain_step(board, agent, CHAIN_DONE.get(agent, "?"), task_id, "passthrough")
+        passthrough_count += 1
+    if passthrough_count:
+        log(f"  → [{board}] passthrough {passthrough_count}개 완료 (harness 미구현 에이전트)")
+
+
+BRAIN_DB = str(Path(os.environ.get("NOVA_HOME", str(Path.home()/".nova"))) / "brain.db")
 
 def record_chain_step(board: str, from_agent: str, to_agent: str, task_id: str, direction: str = "forward"):
     """체인 스텝 단위 nova_brain.db takes 기록 — DreamCycle 학습 소재"""
@@ -656,7 +1061,7 @@ def record_chain_step(board: str, from_agent: str, to_agent: str, task_id: str, 
         db.execute("PRAGMA busy_timeout=5000")
         c = db.cursor()
         now = datetime.now().astimezone().isoformat()
-        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")  # UTC
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")  # UTC
         claim = f"[chain] {board}: {from_agent}→{to_agent} ({direction}) task={task_id[:8]}"
         # 오늘 동일 claim 중복 방지
         existing = c.execute(
@@ -718,6 +1123,25 @@ def main():
         mem_events = handle_memory_events()
         if mem_events > 0:
             log(f"  [MEMORY] {mem_events}개 이벤트 처리 완료")
+        # done 태스크 과다 시 자동 정리 (Broken pipe 방지)
+        for board in boards:
+            try:
+                _db_p = Path(os.environ.get("HERMES_HOME", str(Path.home()/".hermes"))) / "kanban/boards" / board / "kanban.db"
+                if _db_p.exists():
+                    _db = sqlite3.connect(str(_db_p), timeout=3)
+                    _done_cnt = _db.execute("SELECT COUNT(*) FROM tasks WHERE status='done'").fetchone()[0]
+                    _db.close()
+                    if _done_cnt > 60:
+                        _old = sqlite3.connect(str(_db_p), timeout=3).execute(
+                            "SELECT id FROM tasks WHERE status='done' ORDER BY created_at ASC LIMIT ?",
+                            (_done_cnt - 30,)).fetchall()
+                        sqlite3.connect(str(_db_p), timeout=3).close()
+                        for (_tid,) in _old:
+                            subprocess.run(["hermes", "kanban", "--board", board, "archive", _tid],
+                                capture_output=True, timeout=5)
+                        log(f"  [CLEANUP] {board}: done {_done_cnt}→{_done_cnt-len(_old)}개 정리")
+            except Exception as _e:
+                log(f"  [CLEANUP-ERR] {board}: {_e}")
         for board in boards:
             try:
                 run_chain(board)

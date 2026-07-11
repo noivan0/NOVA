@@ -40,11 +40,24 @@ SKIP_SUFFIXES  = {".confluence.md"}
 SKIP_DIRS      = {"archive","weekly","__pycache__"}
 
 # 다중 스캔 경로 (prefix → page_type 매핑)
+NOVA_HOME_PATH = Path(os.environ.get("NOVA_HOME", str(Path.home() / ".nova")))
 SCAN_ROOTS = [
-    (KB_ROOT,              "kb/",        None),           # 기존 KB
-    (HERMES_HOME / "wiki", "wiki/",      "concept"),      # 공유 개념 위키
-    (HERMES_HOME / "doosi" / "kb", "doosi/", "project"),  # 콘텐츠 KB
+    (KB_ROOT,                          "kb/",         None),
+    (NOVA_HOME_PATH / "wiki",          "wiki/",       "wiki"),      # BUG-W5 수정: concept→wiki
+    (HERMES_HOME / "memories",         "memories/",   "memory"),    # BUG-W3: memories 추가
+    (HERMES_HOME / "doosi" / "kb",     "doosi/",      "project"),
+    (NOVA_HOME_PATH / "workspace",     "workspace/",  "harness"),  # harness 결과물
 ]
+
+WORKSPACE_INCLUDE = {"report.md", "summary_report.md", "insights.md", "synthesis.md"}
+
+def _should_include(root: Path, file_path: Path) -> bool:
+    nova_ws = NOVA_HOME_PATH / "workspace"
+    try:
+        file_path.relative_to(nova_ws)
+        return file_path.name in WORKSPACE_INCLUDE
+    except ValueError:
+        return True
 
 # profiles/nova-*/evolution.md 만 선택 추가 (스킬 복사본 제외)
 AGENT_PROFILES = [
@@ -98,7 +111,7 @@ def _sync_changed_inner(embed: bool = True) -> dict:
 
     # 다중 경로 스캔
     scan_targets = []
-    for scan_root, prefix, _ in SCAN_ROOTS:
+    for scan_root, prefix, agent_hint in SCAN_ROOTS:
         if scan_root.exists():
             for f in scan_root.rglob("*.md"):
                 if f.name in SKIP_FILES:
@@ -107,16 +120,18 @@ def _sync_changed_inner(embed: bool = True) -> dict:
                     continue
                 if any(d in str(f) for d in SKIP_DIRS):
                     continue
+                if not _should_include(scan_root, f):
+                    continue
                 rel = prefix + str(f.relative_to(scan_root))
-                scan_targets.append((f, rel))
+                scan_targets.append((f, rel, agent_hint))
 
     # 에이전트 evolution.md 추가
-    for f_path, rel, _ in AGENT_PROFILES:
+    for f_path, rel, agent_hint in AGENT_PROFILES:
         p = Path(f_path)
         if p.exists():
-            scan_targets.append((p, rel))
+            scan_targets.append((p, rel, agent_hint))
 
-    for f, rel in scan_targets:
+    for f, rel, agent_hint in scan_targets:
         result["scanned"] += 1
         try:
             # Codex MEDIUM BUG fix: file_hash(raw bytes) vs pages.content_hash(parsed content) 불일치
@@ -154,7 +169,7 @@ def _sync_changed_inner(embed: bool = True) -> dict:
                     pass  # 파싱 실패 시 재인덱싱
 
             # abs_path를 직접 전달 (다중 경로 지원)
-            ok = brain.index_kb_file_abs(str(f), rel, embed=embed)
+            ok = brain.index_kb_file_abs(str(f), rel, embed=embed, agent_hint=agent_hint)
             if ok:
                 if row:
                     result["updated"] += 1
@@ -183,7 +198,7 @@ def _sync_changed_inner(embed: bool = True) -> dict:
 def _resolve_single_target(path_str: str):
     p = Path(path_str).resolve()
 
-    for scan_root, prefix, _ in SCAN_ROOTS:
+    for scan_root, prefix, agent_hint in SCAN_ROOTS:
         try:
             rel = prefix + str(p.relative_to(scan_root))
         except ValueError:
@@ -194,11 +209,11 @@ def _resolve_single_target(path_str: str):
             return None
         if any(part in SKIP_DIRS for part in p.parts):
             return None
-        return p, rel
+        return p, rel, agent_hint
 
-    for f_path, rel, _ in AGENT_PROFILES:
+    for f_path, rel, agent_hint in AGENT_PROFILES:
         if p == Path(f_path).resolve():
-            return p, rel
+            return p, rel, agent_hint
 
     return None
 
@@ -220,7 +235,7 @@ def sync_one(path_str: str, embed: bool = True) -> dict:
             result["errors"] = 1
             return result
 
-        f, rel = target
+        f, rel, agent_hint = target
         brain = get_brain()
         result["scanned"] = 1
         try:
@@ -228,7 +243,7 @@ def sync_one(path_str: str, embed: bool = True) -> dict:
             row = brain.conn.execute(
                 "SELECT content_hash, indexed_at FROM pages WHERE id=?", (page_id,)
             ).fetchone()
-            ok = brain.index_kb_file_abs(str(f), rel, embed=embed)
+            ok = brain.index_kb_file_abs(str(f), rel, embed=embed, agent_hint=agent_hint)
             if ok:
                 if row:
                     result["updated"] += 1
@@ -294,3 +309,22 @@ if __name__ == "__main__":
     print(f"[완료] 스캔={result['scanned']}개 | "
           f"추가={result['added']} | 업데이트={result['updated']} | "
           f"임베딩={total} | 스킵={result['skipped']} | 오류={result['errors']}")
+
+    # KB 동기화 후 → wiki 자동 갱신 (신규/갱신 파일이 있을 때만)
+    if total > 0:
+        kb_wiki_bridge = HERMES_HOME / "bin" / "nova_kb_wiki_bridge.py"
+        if kb_wiki_bridge.exists():
+            try:
+                import subprocess as _sp
+                r = _sp.run(
+                    [sys.executable, str(kb_wiki_bridge), "--sync"],
+                    capture_output=True, text=True, timeout=60,
+                    env={**os.environ, "HERMES_HOME": str(HERMES_HOME),
+                         "NOVA_HOME": str(NOVA_HOME)}
+                )
+                if r.returncode == 0:
+                    print(f"[nova_kb_sync] wiki 자동 갱신 완료")
+                else:
+                    print(f"[nova_kb_sync] wiki 갱신 실패: {r.stderr[:100]}")
+            except Exception as e:
+                print(f"[nova_kb_sync] wiki 갱신 예외: {e}")

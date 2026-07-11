@@ -43,10 +43,35 @@ class PublisherConfig:
 
 
 @dataclass
+class CodexConfig:
+    """HMG Codex (GPT-5.4) 보조 LLM 설정"""
+    provider: str = "openai"
+    model: str = "gpt-5.4"
+    api_key: str = ""
+    base_url: Optional[str] = "https://internal-llm-gateway.example.com/codex-cli/v2"
+    max_tokens: int = 4096
+    temperature: float = 0.7
+
+
+@dataclass
+class ImageGenConfig:
+    """HMG Gemini 이미지 생성 설정"""
+    provider: str = "hmg_gemini"
+    model: str = "gemini-3.1-flash-image-preview"
+    fallback_model: str = "gemini-3-pro-image-preview"
+    api_key: str = ""   # 마스터 키와 동일; 비어있으면 NOVA_LLM_API_KEY 사용
+    base_url: str = "https://internal-api-gateway.example.com/hchat-in/api/v3/models"
+
+
+@dataclass
 class KBConfig:
     path: str = "./kb"
     auto_record: bool = True
     embedding_enabled: bool = False
+    embedding_provider: str = "hmg_openai"
+    embedding_model: str = "text-embedding-3-large"
+    embedding_base_url: str = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments"
+    embedding_api_key: str = ""   # 마스터 키와 동일; 비어있으면 NOVA_LLM_API_KEY 사용
 
 
 @dataclass
@@ -58,6 +83,8 @@ class NOVAConfig:
 
     # Providers
     llm: LLMConfig = field(default_factory=LLMConfig)
+    codex: CodexConfig = field(default_factory=CodexConfig)
+    image_gen: ImageGenConfig = field(default_factory=ImageGenConfig)
     notifier: NotifierConfig = field(default_factory=NotifierConfig)
     publisher: PublisherConfig = field(default_factory=PublisherConfig)
 
@@ -123,6 +150,27 @@ def _apply_yaml(cfg: NOVAConfig, raw: dict) -> None:
         cfg.kb.path = kb.get("path", cfg.kb.path)
         cfg.kb.auto_record = kb.get("auto_record", cfg.kb.auto_record)
         cfg.kb.embedding_enabled = kb.get("embedding_enabled", cfg.kb.embedding_enabled)
+        cfg.kb.embedding_provider = kb.get("embedding_provider", cfg.kb.embedding_provider)
+        cfg.kb.embedding_model = kb.get("embedding_model", cfg.kb.embedding_model)
+        cfg.kb.embedding_base_url = kb.get("embedding_base_url", cfg.kb.embedding_base_url)
+        cfg.kb.embedding_api_key = kb.get("embedding_api_key", cfg.kb.embedding_api_key)
+
+    if "codex" in raw:
+        cx = raw["codex"]
+        cfg.codex.provider = cx.get("provider", cfg.codex.provider)
+        cfg.codex.model = cx.get("model", cfg.codex.model)
+        cfg.codex.api_key = cx.get("api_key", cfg.codex.api_key)
+        cfg.codex.base_url = cx.get("base_url", cfg.codex.base_url)
+        cfg.codex.max_tokens = int(cx.get("max_tokens", cfg.codex.max_tokens))
+        cfg.codex.temperature = float(cx.get("temperature", cfg.codex.temperature))
+
+    if "image_gen" in raw:
+        ig = raw["image_gen"]
+        cfg.image_gen.provider = ig.get("provider", cfg.image_gen.provider)
+        cfg.image_gen.model = ig.get("model", cfg.image_gen.model)
+        cfg.image_gen.fallback_model = ig.get("fallback_model", cfg.image_gen.fallback_model)
+        cfg.image_gen.api_key = ig.get("api_key", cfg.image_gen.api_key)
+        cfg.image_gen.base_url = ig.get("base_url", cfg.image_gen.base_url)
 
     if "llm" in raw:
         llm_cfg = raw["llm"]
@@ -205,3 +253,30 @@ def _apply_env(cfg: NOVAConfig) -> None:
     # KB
     if v := env("NOVA_KB_PATH"):
         cfg.kb.path = v
+    if v := env("NOVA_KB_EMBEDDING_ENABLED"):
+        cfg.kb.embedding_enabled = v.lower() in ("true", "1", "yes")
+    if v := env("NOVA_KB_EMBEDDING_MODEL"):
+        cfg.kb.embedding_model = v
+    if v := env("NOVA_KB_EMBEDDING_BASE_URL"):
+        cfg.kb.embedding_base_url = v
+    if v := env("NOVA_KB_EMBEDDING_API_KEY") or env("NOVA_LLM_API_KEY"):
+        cfg.kb.embedding_api_key = v
+
+    # Codex (HMG gpt-5.4)
+    if v := env("NOVA_CODEX_API_KEY"):
+        cfg.codex.api_key = v
+    if v := env("NOVA_CODEX_BASE_URL"):
+        cfg.codex.base_url = v
+    if v := env("NOVA_CODEX_MODEL"):
+        cfg.codex.model = v
+
+    # Image Gen (HMG Gemini)
+    if v := env("NOVA_IMAGE_GEN_API_KEY") or env("NOVA_LLM_API_KEY"):
+        cfg.image_gen.api_key = v
+    if v := env("NOVA_IMAGE_GEN_BASE_URL"):
+        cfg.image_gen.base_url = v
+    if v := env("NOVA_IMAGE_GEN_MODEL"):
+        cfg.image_gen.model = v
+    if v := env("NOVA_IMAGE_GEN_FALLBACK_MODEL"):
+        cfg.image_gen.fallback_model = v
+

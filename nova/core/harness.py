@@ -54,6 +54,11 @@ class PhaseDefinition:
     retries: Optional[int] = None
     quality_check: bool = False
     on_failure: str = "retry"         # skip | retry | abort | runbook
+    # per-phase LLM 오버라이드 (미지정 시 nova.yaml 기본 LLM 사용)
+    provider: Optional[str] = None    # anthropic | openai | codex | hmg_gemini
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -155,13 +160,18 @@ def _parse_harness(raw: dict, base_dir: Path) -> HarnessDefinition:
             description=ph.get("description", ""),
             executor=ph.get("executor", "llm"),
             prompt=prompt,
-            command=ph.get("command", ""),
+            command=ph.get("command", ph.get("script", "")),  # BUG-HARNESS: script 필드 폴백
             input_files=ph.get("input_files", []),
             output_file=ph.get("output_file", ""),
             timeout=ph.get("timeout"),
             retries=ph.get("retries"),
             quality_check=ph.get("quality_check", False),
             on_failure=ph.get("on_failure", "retry"),
+            # per-phase LLM 오버라이드
+            provider=ph.get("provider"),
+            model=ph.get("model"),
+            api_key=ph.get("api_key"),
+            base_url=ph.get("base_url"),
             metadata=ph.get("metadata", {}),
         ))
 
