@@ -65,13 +65,17 @@ def _resolve_home(nova_home: str | None) -> Path:
 def _log(msg: str, log_file: Path | None = None) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[brain-watcher] [{ts}] {msg}"
-    print(line, flush=True)
+    # BUG-LOG-DUP 수정: brain_watcher 실행 시 stdout → log_file redirect됨
+    # print() + file.write() 이중 기록으로 모든 로그가 2번씩 찍히는 문제
+    # → log_file 없을 때만 print (디버그), log_file 있으면 파일에만 기록
     if log_file:
         try:
             with open(log_file, "a") as f:
                 f.write(line + "\n")
         except OSError:
             pass
+    else:
+        print(line, flush=True)
 
 
 # ── state persistence ─────────────────────────────────────────────────────────
@@ -98,7 +102,10 @@ def _can_act(state: dict, key: str, min_s: float) -> bool:
 
 def _snap_brain(brain_db: Path) -> dict[str, Any] | None:
     try:
-        db = sqlite3.connect(str(brain_db), timeout=2)
+        # URI read-only 연결 — WAL checkpoint 트리거 방지 (자기 피드백 루프 방지)
+        uri = f"file:{brain_db}?mode=ro"
+        db = sqlite3.connect(uri, uri=True, timeout=2)
+        db.execute("PRAGMA query_only=ON")
         c = db.cursor()
         takes = c.execute("SELECT count(*) FROM takes").fetchone()[0]
         orphan = c.execute(
@@ -117,13 +124,33 @@ def _snap_brain(brain_db: Path) -> dict[str, Any] | None:
         return None
 
 
+_snap_kanban_cache: dict = {}  # {path: (result, ts)}
+_SNAP_KANBAN_TTL = 3.0  # 3초 캐시 — 빠른 연속 이벤트 시 SQLite 재쿼리 방지
+
+def _invalidate_kanban_cache(kanban_dirs: list[Path]) -> None:
+    """kanban.db CLOSE_WRITE 이벤트 수신 시 캐시 무효화 — 최신 값 보장."""
+    for board_dir in kanban_dirs:
+        cache_key = str(board_dir / "kanban.db")
+        _snap_kanban_cache.pop(cache_key, None)
+
 def _snap_kanban(kanban_dirs: list[Path]) -> dict[str, int] | None:
     total_done = total_active = 0
     found = False
+    now = time.time()
     for board_dir in kanban_dirs:
         db_path = board_dir / "kanban.db"
         if not db_path.exists():
             continue
+        # TTL 캐시: 같은 DB를 3초 이내 재쿼리 방지
+        cache_key = str(db_path)
+        if cache_key in _snap_kanban_cache:
+            cached_result, cached_ts = _snap_kanban_cache[cache_key]
+            if now - cached_ts < _SNAP_KANBAN_TTL:
+                if cached_result is not None:
+                    total_done   += cached_result["done"]
+                    total_active += cached_result["active"]
+                    found = True
+                continue
         try:
             db = sqlite3.connect(str(db_path), timeout=2)
             c = db.cursor()
@@ -132,11 +159,13 @@ def _snap_kanban(kanban_dirs: list[Path]) -> dict[str, int] | None:
                 "SELECT count(*) FROM tasks WHERE status IN ('running','todo','ready')"
             ).fetchone()[0]
             db.close()
+            result = {"done": done, "active": active}
+            _snap_kanban_cache[cache_key] = (result, now)
             total_done += done
             total_active += active
             found = True
         except Exception:
-            pass
+            _snap_kanban_cache[cache_key] = (None, now)
     return {"done": total_done, "active": total_active} if found else None
 
 
@@ -187,8 +216,13 @@ def _spawn_inotify(watch_dirs: list[str]) -> subprocess.Popen:
 
 
 _DB_FILENAMES = {
-    "brain.db", "brain.db-wal", "brain.db-shm",
-    "kanban.db", "kanban.db-wal", "kanban.db-shm",
+    # WAL/SHM 파일 제외 — read-only 연결 시에도 shm/wal 파일 open이
+    # inotify CLOSE_WRITE를 트리거해 자기 피드백 루프 유발.
+    # 실제 DB 변경은 brain.db 메인 파일에서만 감지하면 충분.
+    # BUG-WAL-SPIN: kanban.db-wal/shm을 감시하면 마라톤 진행 중 매우 빈번한 이벤트 발생
+    # → _snap_kanban 매 이벤트마다 쿼리 → CPU 99.8% 지속. 메인 파일만 감시.
+    "brain.db",
+    "kanban.db",
 }
 
 # Directories where new subdirectory creation should trigger watcher restart.
@@ -213,6 +247,103 @@ def _run_bg(cmd: list[str], label: str, log_file: Path | None, timeout: int = 60
         except Exception as e:
             _log(f"  [{label}] EXCEPTION {e}", log_file)
 
+    # chain_engine: 긴 작업(orchestrator --wait 포함) → non-daemon으로 brain_watcher 재시작에도 생존
+    # 다른 엔진: daemon=True (빠른 작업이므로 brain_watcher 재시작 시 정리 OK)
+    is_chain = "chain" in label
+    threading.Thread(target=_worker, daemon=not is_chain).start()
+
+
+def _run_harness_bg(harness_name: str, log_file: Path | None,
+                    timeout: int = 300, context: dict | None = None) -> None:
+    """Harness를 백그라운드 스레드에서 Python API로 직접 실행.
+    brain_watcher inotify 이벤트에 의해 자율 트리거됨.
+    완료 후 kb_sync를 즉시 실행해 brain.db에 결과 인덱싱.
+    """
+    def _worker() -> None:
+        try:
+            import sys as _sys
+            nova_src    = Path.home() / "nova"
+            hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+            nova_home   = Path(os.environ.get("NOVA_HOME",   str(Path.home() / ".nova")))
+            hermes_bin  = hermes_home / "bin"
+            for p in (str(hermes_bin), str(nova_src)):
+                if p not in _sys.path:
+                    _sys.path.insert(0, p)
+
+            from nova.core.config import load_config
+            from nova.core.harness import HarnessLoader
+            from nova.core.orchestrator import Orchestrator
+
+            # BUG-APIKEY: *** 독립 프로세스 → Hermes nova_bridge가 주입하는
+            # NOVA_LLM_API_KEY 등이 없음.
+            # 우선순위: .env HERMES_MASTER_APIKEY → config.yaml model.api_key
+            try:
+                import yaml as _yaml
+                _env_path = hermes_home / ".env"
+                _master_key = ""
+                # 1순위: .env HERMES_MASTER_APIKEY
+                if _env_path.exists():
+                    for _line in _env_path.read_text(errors="replace").splitlines():
+                        _line = _line.strip()
+                        if _line.startswith("HERMES_MASTER_APIKEY="):
+                            _master_key = _line.split("=", 1)[1].strip()
+                            break
+                # 2순위: config.yaml model.api_key (폴백)
+                if not _master_key:
+                    _hcfg_path = hermes_home / "config.yaml"
+                    if _hcfg_path.exists():
+                        _hcfg = _yaml.safe_load(_hcfg_path.read_text()) or {}
+                        _master_key = _hcfg.get("model", {}).get("api_key", "")
+                if _master_key:
+                    for _var in ("NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
+                                 "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY",
+                                 "NOVA_CODEX_API_KEY", "NOVA_IMAGE_GEN_API_KEY"):
+                        os.environ.setdefault(_var, _master_key)
+            except Exception:
+                pass  # API key 주입 실패해도 계속 진행
+
+            cfg = load_config(str(nova_home / "nova.yaml"))
+            cfg.harnesses_dir = str(Path(cfg.harnesses_dir).expanduser())
+            cfg.workspace     = str(Path(cfg.workspace).expanduser())
+
+            loader  = HarnessLoader(cfg.harnesses_dir)
+            harness = loader.load(harness_name)
+            orch    = Orchestrator(cfg)
+            # BUG-HARNESS-TOPIC 수정: context 파라미터로 topic 주입 지원
+            run_ctx = context if context else {}
+            ok      = orch.run(harness, context=run_ctx, resume=False)
+
+            if ok:
+                _log(f"  [harness:{harness_name}] OK — report 생성 완료", log_file)
+                # harness 완료 즉시 kb_sync — workspace → brain.db 인덱싱 (BUG-A2 수정)
+                # WARN-4 수정: /usr/bin/python3 우선 (sqlite_vec 위치 안전)
+                _kb_py = None
+                for _try_py in ("/usr/bin/python3", "/usr/local/bin/python3", _sys.executable):
+                    try:
+                        import subprocess as _sp_chk
+                        if _sp_chk.run([_try_py, "-c", "import sqlite_vec"], capture_output=True).returncode == 0:
+                            _kb_py = _try_py; break
+                    except Exception:
+                        pass
+                if not _kb_py:
+                    _kb_py = _sys.executable
+                sync_r = subprocess.run(
+                    [_kb_py, str(hermes_bin / "nova_kb_sync.py")],
+                    env={**os.environ,
+                         "HERMES_HOME": str(hermes_home),
+                         "NOVA_HOME":   str(nova_home),
+                         "PYTHONPATH":  str(hermes_bin) + ":" + str(nova_src)},
+                    capture_output=True, text=True, timeout=60,
+                )
+                if sync_r.returncode == 0:
+                    _log(f"  [harness:{harness_name}] kb_sync 완료 → brain.db 갱신", log_file)
+                else:
+                    _log(f"  [harness:{harness_name}] kb_sync 실패 rc={sync_r.returncode} {(sync_r.stderr or sync_r.stdout)[:100]}", log_file)
+            else:
+                _log(f"  [harness:{harness_name}] FAIL — Orchestrator 오류", log_file)
+        except Exception as e:
+            _log(f"  [harness:{harness_name}] EXCEPTION {e}", log_file)
+
     threading.Thread(target=_worker, daemon=True).start()
 
 
@@ -222,18 +353,20 @@ REACT = {
     "takes_for_dream":       100,   # +N takes → DreamCycle
     "takes_for_synthesize":   15,   # +N takes → synthesize
     "takes_for_learn":         5,   # +N takes → learn_engine
+    "takes_for_harness":      20,   # +N takes → research harness (자율 지식 생산)
     "orphan_max":              3,   # orphan ≥ N → fix_orphan
-    "health_critical":        90.0, # health < N → DreamCycle
-    "chain_min_s":            10,
+    "health_critical":        85.0, # health < N → DreamCycle (87 안정권 → 만성 낭비 방지)
+    "chain_min_s":            30,   # 30초 cooldown — 에이전트 실행 중 과도한 spawn 방지
     "synthesize_min_s":      300,
     "dream_min_s":          7200,   # 2 h
     "learn_min_s":          1800,   # 30 min
+    "harness_min_s":        1200,   # 20 min (대화 맥락 유지 충분)
     "crosslink_min_s":     21600,   # 6 h
     "takes_wiki_min_s":    43200,   # 12 h
     "stale_wiki_min_s":    86400,   # 24 h
-    "memory_check_min_s":   1800,   # 30 min
-    "memory_slim_threshold":  85,   # %
-    "memory_limit_chars":  20_000,
+    "memory_check_min_s":   7200,   # 2 h (30 min → 2 h: 과잉 slim 순환 방지)
+    "memory_slim_threshold":  90,   # % — 90%(1980자) 이상일 때만 slim (85 → 90: slim 과열 방지)
+    "memory_limit_chars":   2_200,  # BUG-W2b: Hermes 실제 한계 2200자와 일치
 }
 
 
@@ -252,7 +385,12 @@ def _react(
     """Decide and execute reactions based on what changed."""
     R = REACT
     acted: list[str] = []
+    # BUG-HARNESS-RESET 수정: brain_prev 기반 new_takes는 재시작 시마다 초기화됨.
+    # state["takes_at_last_harness"]를 영속화해 재시작 내성(restart-tolerant) 누적 카운팅.
+    # harness 전용 new_takes는 state에서, 그 외 엔진용은 in-memory brain_prev 사용.
     new_takes = brain_now["takes"] - brain_prev.get("takes", brain_now["takes"])
+    harness_base = state.get("takes_at_last_harness", brain_now["takes"])
+    new_takes_for_harness = brain_now["takes"] - harness_base
 
     # CRITICAL: health drop
     if brain_now["health"] < R["health_critical"]:
@@ -272,13 +410,38 @@ def _react(
         state["last_fix_orphan"] = time.time()
         acted.append("fix_orphan")
 
+    # orphan takes 자동연결 (30분마다, takes_link 엔진 있을 때)
+    # brain_watcher orphan은 pages 기준이고 takes orphan(page_id=NULL)은 별도 처리 필요
+    if "takes_link" in engines and _can_act(state, "takes_link", 1800):
+        _log("  → takes_link (orphan takes 연결)", log_file)
+        _run_bg(engines["takes_link"], "takes_link", log_file, timeout=60)
+        state["last_takes_link"] = time.time()
+        acted.append("takes_link")
+
     # Kanban done → chain_engine
     if kanban_now and kanban_prev:
         new_done = kanban_now["done"] - kanban_prev.get("done", kanban_now["done"])
-        if new_done > 0 and _can_act(state, "chain", R["chain_min_s"]):
-            _log(f"  kanban done +{new_done} → chain_engine", log_file)
+        # ★ chain_engine 트리거 조건 (3가지):
+        # 1) new_done > 0: done 증가 → 정상 트리거
+        # 2) has_ready: active(running/todo/ready) 있고 done도 있음 → 루프 진행 중 재트리거
+        # 3) done_only_changed: active=0이지만 done이 변했음 → 마지막 에이전트 완료 후 체인 처리 필요
+        #    (nova-investigate done → nova-dev 재생성 등 체인 로직이 아직 남아있을 수 있음)
+        has_ready = kanban_now.get("active", 0) > 0 and kanban_now.get("done", 0) > 0
+        kanban_state_changed = (kanban_now != kanban_prev)
+        # active=0이고 done이 있을 때도 상태 변화 시 체인 실행 (마지막 에이전트 완료 처리)
+        done_only_changed = (kanban_now.get("active", 0) == 0 and
+                             kanban_now.get("done", 0) > 0 and
+                             kanban_state_changed)
+        chain_trigger = (new_done > 0) or (has_ready and kanban_state_changed) or done_only_changed
+        if chain_trigger and _can_act(state, "chain", R["chain_min_s"]):
+            reason = (f"done +{new_done}" if new_done > 0 else
+                      f"ready tasks (active={kanban_now.get('active')})" if has_ready else
+                      f"done-only state change (done={kanban_now.get('done')})")
+            _log(f"  kanban {reason} → chain_engine", log_file)
             if "chain" in engines:
-                _run_bg(engines["chain"], "chain_engine", log_file, timeout=60)
+                # timeout=3600: chain_engine이 내부적으로 orchestrator --wait를 호출하므로
+                # harness 실행 시간(최대 ~10분 × 에이전트 수)을 수용해야 함
+                _run_bg(engines["chain"], "chain_engine", log_file, timeout=3600)
             state["last_chain"] = time.time()
             acted.append("chain_engine")
 
@@ -302,6 +465,23 @@ def _react(
             _run_bg(engines["learn"], "learn", log_file, timeout=120)
             state["last_learn"] = time.time()
         acted.append("learn")
+
+    # harness는 elif 체인과 독립 — synthesize/learn과 무관하게 별도 판단
+    # new_takes_for_harness: state 영속화 기반 누적 (재시작 내성)
+    # takes 20개 이상 누적(synthesize 임계값 15 초과) = 지속적 대화 →
+    # research harness로 심화 탐구 → workspace/report.md → kb_sync → brain.db
+    if new_takes_for_harness >= R["takes_for_harness"] and _can_act(state, "harness", R["harness_min_s"]):
+        _log(f"  takes +{new_takes_for_harness} (누적) → research harness (자율 지식 생산)", log_file)
+        # BUG-HARNESS-TOPIC 수정: brain 상태 기반 topic 자동 생성 ({{topic}} 플레이스홀더 미치환 방지)
+        harness_topic = (
+            f"NOVA KB 자율 탐구 — 최근 {new_takes_for_harness}개 대화 인사이트 기반 핵심 주제 분석. "
+            f"brain.db: takes={brain_now['takes']}, pages={brain_now.get('total_pages', '?')}, "
+            f"health={brain_now['health']}"
+        )
+        _run_harness_bg("research", log_file, context={"topic": harness_topic})
+        state["last_harness"] = time.time()
+        state["takes_at_last_harness"] = brain_now["takes"]  # BUG-HARNESS-RESET: 영속화
+        acted.append("harness_research")
 
     # Cascade: wiki crosslink (after synthesize or dream)
     if any(a in acted for a in ["synthesize", "dream_takes", "dream_critical"]):
@@ -354,8 +534,12 @@ def _react(
             _log(f"  MEMORY {snap['pct']}% ≥ {R['memory_slim_threshold']}% → memory_slim", log_file)
             if "memory_slim" in engines:
                 _run_bg(engines["memory_slim"], "memory_slim", log_file, timeout=60)
-            state["last_memory_slim"] = time.time()
-            acted.append(f"memory_slim_{snap['pct']}pct")
+                # BUG-W6 수정: state 기록은 실제 실행 시에만 (if 블록 안으로 이동)
+                state["last_memory_slim"] = time.time()
+                acted.append(f"memory_slim_{snap['pct']}pct")
+            else:
+                # 엔진 없을 때 경고 로그 (허위 acted 기록 방지)
+                _log(f"  WARN: memory_slim 엔진 없음 — 메모리 {snap['pct']}% 위험, engines/ 확인 필요", log_file)
 
     return acted
 
@@ -383,18 +567,29 @@ def run(
         Print all inotify events (not just acted ones).
     """
     brain_db = nova_home / "brain.db"
-    kanban_root = nova_home / "kanban" / "boards"
+    # BUG-CRITICAL-2 수정: kanban은 ~/.nova가 아닌 ~/.hermes에 위치
+    # nova_home = ~/.nova, hermes_home = ~/.hermes
+    # 실제 kanban DB: ~/.hermes/kanban/boards/<board>/kanban.db
+    hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+    kanban_root = hermes_home / "kanban" / "boards"
+    # fallback: nova_home에도 kanban이 있으면 함께 감시
+    nova_kanban_root = nova_home / "kanban" / "boards"
     state_file = nova_home / "logs" / "brain_watcher_state.json"
     log_file = nova_home / "logs" / "brain_watcher.log"
-    memory_md = nova_home / "memory.md"
+    memory_md = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "memories" / "MEMORY.md"
+    # BUG-E3 수정: 에이전트들이 읽는 MEMORY.md와 동일한 경로 사용
+    # (기존: nova_home/"memory.md" → slim 트리거 불일치)
 
     (nova_home / "logs").mkdir(parents=True, exist_ok=True)
 
-    # Resolve kanban board dirs
+    # Resolve kanban board dirs (hermes + nova 두 경로 모두 감시)
     def _kanban_dirs() -> list[Path]:
-        if not kanban_root.exists():
-            return []
-        return [d for d in kanban_root.iterdir() if d.is_dir() and (d / "kanban.db").exists()]
+        dirs: list[Path] = []
+        for root in (kanban_root, nova_kanban_root):
+            if root.exists():
+                dirs.extend(d for d in root.iterdir()
+                            if d.is_dir() and (d / "kanban.db").exists())
+        return dirs
 
     # Engine defaults (override with engines= param)
     engines_dir = nova_home / "engines"
@@ -405,6 +600,7 @@ def run(
         "chain":       [sys.executable, str(engines_dir / "chain.py")],
         "fix_orphan":  [sys.executable, str(engines_dir / "fix_orphan.py")],
         "memory_slim": [sys.executable, str(engines_dir / "memory_slim.py")],
+        "takes_link":  [sys.executable, str(engines_dir / "takes_link.py")],  # orphan takes → pages 자동연결
     }
     if engines:
         default_engines.update(engines)
@@ -423,7 +619,9 @@ def run(
     state = _load_state(state_file)
     board_dirs = _kanban_dirs()
     watch_dirs = _watch_dirs(brain_db, board_dirs)
-    kanban_restart_prefix = str(kanban_root) if kanban_root.exists() else None
+    kanban_restart_prefix = str(kanban_root) if kanban_root.exists() else (
+        str(nova_kanban_root) if nova_kanban_root.exists() else None
+    )
 
     brain_prev = _snap_brain(brain_db) or {}
     kanban_prev = _snap_kanban(board_dirs)
@@ -433,6 +631,14 @@ def run(
     _log(f"  watch_dirs: {watch_dirs}", log_file)
     if active_engines:
         _log(f"  engines: {list(active_engines.keys())}", log_file)
+
+    # ★ 시작 시 즉시 체인 트리거: done이 있고 active가 없으면 미처리 체인 태스크가 있을 수 있음
+    # (watcher 재시작 직후 kanban_prev==kanban_now이므로 이벤트 루프에서 절대 트리거 안 됨)
+    if kanban_prev and kanban_prev.get("done", 0) > 0 and kanban_prev.get("active", 0) == 0:
+        _log(f"  [STARTUP] done={kanban_prev['done']} active=0 → chain_engine 즉시 트리거", log_file)
+        if "chain" in active_engines and _can_act(state, "chain", 0):  # startup은 cooldown 무시
+            _run_bg(active_engines["chain"], "chain_engine", log_file, timeout=3600)
+            state["last_chain"] = time.time()
 
     while True:
         proc = _spawn_inotify(watch_dirs)
@@ -454,6 +660,18 @@ def run(
                         _log(f"  new kanban board detected → restart watcher: {full}", log_file)
                         board_dirs = _kanban_dirs()
                         watch_dirs = _watch_dirs(brain_db, board_dirs)
+                        # BUG-INOTIFY-LEAK 수정: break 전에 현재 inotify proc 명시적 종료
+                        # 이전에는 finally에서 terminate했으나 break 시 finally가 실행되지 않아
+                        # 재시작할 때마다 inotifywait 좀비 프로세스가 1개씩 누적됨
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=2)
+                        except Exception:
+                            try:
+                                proc.kill()
+                                proc.wait(timeout=1)
+                            except Exception:
+                                pass
                         break
                     # Ignore ISDIR events from other directories (backups, cache…)
                     continue
@@ -461,6 +679,13 @@ def run(
                 # Only react to actual DB file changes
                 if filename not in _DB_FILENAMES:
                     continue
+
+                # BUG-CPU-SPIN: 마라톤 중 kanban.db가 초당 수십 번 업데이트됨
+                # 이벤트를 최소 0.5초 간격으로 처리 — CPU 절감 + 상태 정확도 유지
+                _now = time.time()
+                if _now - state.get("_last_event_ts", 0) < 0.5:
+                    continue
+                state["_last_event_ts"] = _now
 
                 brain_now = _snap_brain(brain_db)
                 kanban_now = _snap_kanban(board_dirs)

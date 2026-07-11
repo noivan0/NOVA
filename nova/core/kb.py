@@ -31,7 +31,7 @@ from typing import List, Optional
 
 class KB:
     def __init__(self, path: str = "./kb"):
-        self.root = Path(path)
+        self.root = Path(path).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self._ensure_structure()
 
