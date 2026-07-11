@@ -344,7 +344,7 @@ def _run_harness_bg(harness_name: str, log_file: Path | None,
         except Exception as e:
             _log(f"  [harness:{harness_name}] EXCEPTION {e}", log_file)
 
-    threading.Thread(target=_worker, daemon=True).start()
+    threading.Thread(target=_worker, daemon=False).start()  # daemon=False: 재시작 시 harness 완료 보장
 
 
 # ── reaction logic ────────────────────────────────────────────────────────────
