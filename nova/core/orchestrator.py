@@ -260,15 +260,16 @@ class Orchestrator:
             phases_run.append(phase.id)
 
             if not result.success:
-                phases_failed.append(phase.id)
                 recovered = self._handle_failure(
                     phase, harness, workspace, context, result, runbook_fired
                 )
                 if not recovered:
                     if phase.on_failure == "skip":
                         print(f"[nova] Phase {phase.id} failed — skipping (on_failure=skip)")
+                        # skip 실패는 phases_failed에 추가하지 않음 — fanout과 동일 동작
                         continue
-                    elif phase.on_failure == "abort":
+                    phases_failed.append(phase.id)  # skip이 아닌 경우에만 추가
+                    if phase.on_failure == "abort":
                         print(f"[nova] Phase {phase.id} failed — aborting harness")
                         return False
                     else:
