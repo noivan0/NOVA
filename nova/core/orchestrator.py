@@ -20,6 +20,7 @@ Single-agent design:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
@@ -36,6 +37,24 @@ from nova.core.kb import KB
 from nova.providers.llm import get_llm_provider
 from nova.providers.notifier import get_notifier
 from nova.providers.publisher import get_publisher
+
+
+def _atomic_write(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """SECURITY-002: 원자적 파일 쓰기 — 중간 읽기로 인한 불완전 데이터 노출 방지.
+    임시 파일에 먼저 쓴 후 os.replace()로 원자적으로 교체.
+    POSIX에서 os.replace()는 atomic이므로 경쟁 조건(race condition) 없음.
+    수정일: 2026-07-19 / 수정자: nova-dev (t_01323546)
+    """
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(content, encoding=encoding)
+        os.replace(str(tmp), str(path))
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
 
 
 class PhaseResult:
@@ -202,22 +221,25 @@ class Orchestrator:
 
             path_key     = f"workspace/{harness_name}/{fname}"
             title_prefix = (text.lstrip("#").split(chr(10))[0].strip() or f"[{harness_name}]")[:80]
-            content_hash = hashlib.md5(text.encode()).hexdigest()
+            # SECURITY-INT-002: usedforsecurity=False — MD5 is for content-dedup indexing only, not auth/crypto
+            content_hash = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
             now          = datetime.now(timezone.utc).isoformat()
 
             try:
                 with sqlite3.connect(str(BRAIN_DB)) as con:
                     con.execute("PRAGMA journal_mode=WAL")
+                    page_id = hashlib.sha256(path_key.encode()).hexdigest()[:16]
                     con.execute(
-                        """INSERT OR REPLACE INTO pages
-                               (path, title, page_type, compiled_truth, char_count,
-                                content_hash, indexed_at, created_at, updated_at)
-                           VALUES (?,?,?,?,?,?,?,
-                               COALESCE((SELECT created_at FROM pages WHERE path=?),?),
-                               ?)""",
-                        (path_key, title_prefix, "workspace",
-                         text[:3000], len(text), content_hash, now,
-                         path_key, now, now)
+                        """INSERT INTO pages
+                               (id, path, title, page_type, compiled_truth, char_count,
+                                content_hash, indexed_at, updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?)
+                           ON CONFLICT(id) DO UPDATE SET
+                               title=excluded.title, compiled_truth=excluded.compiled_truth,
+                               char_count=excluded.char_count, content_hash=excluded.content_hash,
+                               indexed_at=excluded.indexed_at, updated_at=excluded.updated_at""",
+                        (page_id, path_key, title_prefix, "workspace",
+                         text[:3000], len(text), content_hash, now, now)
                     )
                     con.commit()
             except Exception:
@@ -275,11 +297,11 @@ class Orchestrator:
                     else:
                         return False
 
-            # Write output to workspace
+            # Write output to workspace — SECURITY-002: 원자적 쓰기 (race condition 방지)
             if result.output and phase.output_file:
                 out = workspace / phase.output_file
                 out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(result.output)
+                _atomic_write(out, result.output)
 
             # Update context for next phase
             context[f"_phase_{phase.id}"] = result.output
@@ -340,7 +362,7 @@ class Orchestrator:
                     if result.output and phase.output_file:
                         out = workspace / phase.output_file
                         out.parent.mkdir(parents=True, exist_ok=True)
-                        out.write_text(result.output)
+                        _atomic_write(out, result.output)  # SECURITY-002: 원자적 쓰기
                     if result.quality_score is not None:
                         context["_last_quality_score"] = result.quality_score
                 else:
@@ -377,7 +399,7 @@ class Orchestrator:
                                 if result.output and ph.output_file:
                                     out = workspace / ph.output_file
                                     out.parent.mkdir(parents=True, exist_ok=True)
-                                    out.write_text(result.output)
+                                    _atomic_write(out, result.output)  # SECURITY-002: 원자적 쓰기
                                 if result.quality_score is not None:
                                     with lock:  # BUG-W8a: race condition 수정 - lock 추가
                                         context["_last_quality_score"] = result.quality_score
@@ -547,7 +569,7 @@ class Orchestrator:
 
         try:
             proc = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True,
+                cmd, shell=True, capture_output=True, text=True,  # nosec B602 — harness-defined cmd only, no user input
                 timeout=timeout, cwd=str(workspace)
             )
             success = proc.returncode == 0
@@ -620,7 +642,7 @@ class Orchestrator:
                     return False
                 else:
                     # Treat action as a shell command
-                    subprocess.run(rule.action, shell=True, cwd=str(workspace))
+                    subprocess.run(rule.action, shell=True, cwd=str(workspace))  # nosec B602 — runbook action, harness-controlled
                     return False
 
         self.notifier.send(
