@@ -23,6 +23,7 @@ Schema:
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,7 @@ class Checkpoint:
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
         self._path = self.workspace / self.FILENAME
+        self._lock = threading.Lock()  # SECURITY-INT-001: thread-safe checkpoint writes
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -104,14 +106,23 @@ class Checkpoint:
     # ------------------------------------------------------------------ #
 
     def _write(self, data: dict) -> None:
-        with open(self._path, "w") as f:
-            json.dump(data, f, indent=2)
+        """SECURITY-INT-001: 스레드 안전 원자적 체크포인트 쓰기.
+        병렬 팬아웃 환경에서 복수 스레드가 동시 호출 시 .tmp 파일 경쟁 방지.
+        """
+        with self._lock:
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2))
+            tmp.replace(self._path)  # atomic on POSIX
 
     def _read(self) -> Optional[dict]:
         if not self._path.exists():
             return None
-        with open(self._path) as f:
-            return json.load(f)
+        try:
+            return json.loads(self._path.read_text())
+        except (json.JSONDecodeError, OSError):
+            # corrupted checkpoint → discard and restart clean
+            self._path.unlink(missing_ok=True)
+            return None
 
 
 def _now() -> str:
