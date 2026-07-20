@@ -1,0 +1,70 @@
+# NOVA Kernel — 에이전트 소유권 규칙
+# path_pattern: glob 패턴 (* = 단일 경로 세그먼트, ** = 재귀)
+# agents: 해당 패턴을 소유하는 에이전트 목록
+#   - 빈 리스트([])는 경로에서 에이전트명 추출 (kb/agents/<agent-name>/ 패턴)
+#   - ["*"]는 모든 에이전트 허용
+# ops: 허용 작업 목록 [read, write, delete]
+
+rules:
+  - path_pattern: "workspace/code_implement/**"
+    agents: ["nova-dev", "harness"]
+    ops: [write, delete]
+
+  - path_pattern: "workspace/code_review/**"
+    agents: ["nova-review", "harness"]
+    ops: [write, delete]
+
+  - path_pattern: "workspace/research/**"
+    agents: ["nova-research", "nova-autoplan", "harness"]
+    ops: [write, delete]
+
+  - path_pattern: "workspace/**"
+    agents: ["harness"]
+    ops: [write, delete]
+
+  # nova_workspace/: brain_watcher harness 결과물 (A 영역 FAIL 수정)
+  - path_pattern: "nova_workspace/**"
+    agents: ["harness", "nova-dev", "nova-research", "nova-review", "nova-autoplan"]
+    ops: [write, delete]
+
+  - path_pattern: "kb/agents/**"
+    agents: []  # 빈 리스트 = 경로에서 에이전트명 추출 (kb/agents/<agent-name>/)
+    ops: [write, delete]
+
+  - path_pattern: "kb/**"
+    agents: ["knowledge", "wiki", "memory"]
+    ops: [write, delete]
+
+  # 루트 경로: index.md, projects/, weekly/ 등 (A 영역 FAIL 수정)
+  - path_pattern: "projects/**"
+    agents: ["knowledge", "harness"]
+    ops: [write, delete]
+
+  - path_pattern: "weekly/**"
+    agents: ["knowledge", "harness"]
+    ops: [write, delete]
+
+  - path_pattern: "config/**"
+    agents: ["knowledge", "harness"]
+    ops: [write, delete]
+
+  - path_pattern: "fixes/**"
+    agents: ["knowledge", "harness"]
+    ops: [write, delete]
+
+  - path_pattern: "user/**"
+    agents: ["knowledge", "memory"]
+    ops: [write, delete]
+
+  - path_pattern: "agents/**"
+    agents: []  # 경로에서 에이전트명 추출
+    ops: [write, delete]
+
+  - path_pattern: "**"  # 폴백: 모든 경로 읽기 허용
+    agents: ["*"]       # * = 모든 에이전트
+    ops: [read]
+
+defaults:
+  allow_read: true       # 읽기는 모든 에이전트 허용
+  allow_unknown: false   # 규칙 없는 경로 쓰기는 기본 거부
+  auto_assign_agent: true  # kb_write 시 소유권 규칙 기반 agent 자동 배정

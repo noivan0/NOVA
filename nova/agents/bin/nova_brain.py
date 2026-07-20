@@ -730,7 +730,7 @@ class NovaBrain:
 
         total_pages = self.conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
         pages_with_takes = self.conn.execute(
-            "SELECT COUNT(DISTINCT page_id) FROM takes WHERE superseded_by IS NULL"
+            "SELECT COUNT(DISTINCT page_id) FROM takes WHERE page_id IS NOT NULL AND page_id IN (SELECT id FROM pages WHERE id IS NOT NULL)"
         ).fetchone()[0]
         open_contradictions = self.conn.execute(
             "SELECT COUNT(*) FROM contradictions WHERE status='open'"
@@ -787,6 +787,7 @@ class NovaBrain:
             "orphan_pages": orphan_pages,
             "stale_pages": stale_pages,
             "thresholds_crossed": json.dumps(thresholds_crossed),
+            "takes_total": self.conn.execute("SELECT COUNT(*) FROM takes").fetchone()[0],
         }
 
         # BUG-HEALTH-EVOLUTION 수정: 직전 health와의 score_overall 변화량 계산
@@ -800,10 +801,10 @@ class NovaBrain:
             INSERT INTO brain_health
             (measured_at, measured_by, score_overall, score_coverage, score_freshness,
              score_consistency, score_depth, score_evolution, total_pages, pages_with_takes,
-             open_contradictions, orphan_pages, stale_pages, thresholds_crossed)
+             open_contradictions, orphan_pages, stale_pages, takes_total, thresholds_crossed)
             VALUES (:measured_at,:measured_by,:score_overall,:score_coverage,:score_freshness,
                     :score_consistency,:score_depth,:score_evolution,:total_pages,:pages_with_takes,
-                    :open_contradictions,:orphan_pages,:stale_pages,:thresholds_crossed)
+                    :open_contradictions,:orphan_pages,:stale_pages,:takes_total,:thresholds_crossed)
         """, result)
         self.conn.commit()
         return result

@@ -1,0 +1,82 @@
+# NOVA Kernel — 도메인 인터럽트 라우팅 설정 (HMG 전용)
+# =====================================================
+#
+# 이 파일만 교체하면 다른 조직에서도 NOVA Semantic Interrupt Scheduler를
+# 즉시 사용할 수 있습니다. 코어(interrupt.py)에는 HMG 전용 로직이 없습니다.
+#
+# 구조:
+#   domains.<slug>:
+#     description  : 도메인 설명 (로그/디버그 용도)
+#     keywords     : 매칭 키워드 그룹 (list[list[str]])
+#                    각 그룹 내 하나라도 claim에 있으면 매칭됨
+#     harness      : 트리거할 harness 이름
+#     cooldown_min : 동일 harness 재트리거 방지 쿨다운 (분)
+#     min_matches  : 트리거에 필요한 최소 매칭 take 수
+#
+#   defaults:
+#     fallback_harness   : 도메인 미매칭 시 기본 harness
+#     fallback_cooldown_min : 폴백 harness 쿨다운 (분)
+#     fallback_min_takes : 폴백 트리거 최소 takes 누적 수
+
+domains:
+
+  mms:
+    description: "HMG [REDACTED_FACILITY] MMS/CNC 데이터 분석 및 모니터링"
+    keywords:
+      - ["[REDACTED_ENGINE_CODE]", "[REDACTED_ENGINE]", "세타", "T15", "MMS", "CNC"]
+      - ["사이클타임", "CT", "OP11", "OP14", "OP16"]
+      - ["[REDACTED_FACILITY]", "블록라인", "가공", "모니터링", "공정"]
+    harness: mms_research  # Phase 4: mms_research 전담 harness
+    cooldown_min: 60       # 1시간 쿨다운
+    min_matches: 2         # take 2개 이상 매칭 시 트리거
+
+  nuuseta:
+    description: "[REDACTED_PROJECT2]+[REDACTED_PROJECT] 프로젝트 — 공구 관리, 블록라인 설비"
+    keywords:
+      - ["[REDACTED_PROJECT2]", "[REDACTED_CODE]", "툴리스트", "공구", "[REDACTED_PROJECT]"]
+      - ["블록라인", "[REDACTED_PROJECT2]공구", "[REDACTED_PROJECT2]세타"]
+    harness: nuuseta_research  # Phase 4: nuuseta_research 전담 harness
+    cooldown_min: 120          # 2시간 쿨다운
+    min_matches: 2
+
+  nc_program:
+    description: "NC 프로그램 관리 — FTP 전송, 자동 보정"
+    keywords:
+      - ["NC프로그램", "NC 프로그램", "FTP"]
+      - ["자동보정", "자동전송", "DNC", "NC파일"]
+    harness: research
+    cooldown_min: 180     # 3시간 쿨다운
+    min_matches: 2
+
+  mos:
+    description: "MOS(제조운영시스템) — 생산 계획, 불량 분석"
+    keywords:
+      - ["MOS", "제조운영", "불량", "ADpro"]
+      - ["생산계획", "공정관리", "설비현황"]
+    harness: research
+    cooldown_min: 90
+    min_matches: 2
+
+  system:
+    description: "시스템/버그 자가치유 — 에러 패턴, 버그 수정"
+    keywords:
+      - ["BUG", "버그", "에러", "Error", "FAIL"]
+      - ["수정", "수정 필요", "traceback", "exception", "실패"]
+      - ["오류", "비정상", "크래시", "hang"]
+    harness: investigate  # SELF_HEAL 전용 investigate harness
+    cooldown_min: 30      # 30분 쿨다운 (긴급도 높음)
+    min_matches: 3        # 에러 3개 이상 누적 시 트리거
+
+  teams_bot:
+    description: "Teams 챗봇 / MCP 게이트웨이 연동"
+    keywords:
+      - ["Teams", "챗봇", "CDP", "Gateway"]
+      - ["Teams봇", "webhook", "MCP"]
+    harness: research
+    cooldown_min: 120
+    min_matches: 2
+
+defaults:
+  fallback_harness: research        # 도메인 미매칭 시 기본 harness
+  fallback_cooldown_min: 20         # 폴백 기본 쿨다운 (분)
+  fallback_min_takes: 20            # SYNTHESIZE 폴백 트리거 최소 takes 누적 수

@@ -599,7 +599,14 @@ class Orchestrator:
             if use_signal:
                 old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
                 signal.alarm(timeout)
-            exec(phase.command, {"__builtins__": __builtins__}, local_vars)  # noqa: S102
+            # NOTE: exec(code, globals, locals) 분리 시 genexpr/listcomp 스코프가 globals를
+            # 참조하기 때문에 locals에 정의된 변수를 찾지 못하는 Python 버그가 있음.
+            # globals dict에 local_vars를 병합하여 단일 namespace로 실행한다.
+            exec_globals = {"__builtins__": __builtins__}
+            exec_globals.update(local_vars)
+            exec(phase.command, exec_globals)  # noqa: S102
+            # local_vars "output" 키를 exec_globals에서 읽어온다
+            local_vars.update(exec_globals)
             return PhaseResult(phase.id, True, output=str(local_vars.get("output", "")))
         except TimeoutError as e:
             return PhaseResult(phase.id, False, error=str(e))
