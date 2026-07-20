@@ -561,10 +561,16 @@ def _cmd_watcher(args) -> None:
             print(f"[brain-watcher] already running (pid={_read_pid(brain_pid_file)})")
         else:
             log = pid_dir / "brain_watcher.log"
+            import os as _os
+            _watcher_env = {**_os.environ,
+                "NOVA_LLM_PROVIDER": "hmg",
+                "NOVA_LLM_BASE_URL": "https://h-chat-api.autoever.com/claude-code/v2",
+                "NOVA_LLM_MODEL": "claude-sonnet-4-6",
+            }
             proc = subprocess.Popen(
                 [sys.executable, "-m", "nova.watcher.brain", "--nova-home", nova_home_str],
                 stdout=open(log, "a"), stderr=subprocess.STDOUT,
-                start_new_session=True,
+                start_new_session=True, env=_watcher_env,
             )
             brain_pid_file.write_text(str(proc.pid))
             print(f"[brain-watcher] started (pid={proc.pid}, log={log})")

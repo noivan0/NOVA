@@ -54,6 +54,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    from nova.watcher.cron_engine import cron_tick as _cron_tick
+    _CRON_ENGINE_AVAILABLE = True
+except Exception:
+    _CRON_ENGINE_AVAILABLE = False
+    def _cron_tick(*args, **kwargs) -> list:  # type: ignore[misc]
+        return []
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -109,7 +117,7 @@ def _snap_brain(brain_db: Path) -> dict[str, Any] | None:
         c = db.cursor()
         takes = c.execute("SELECT count(*) FROM takes").fetchone()[0]
         orphan = c.execute(
-            "SELECT count(*) FROM pages WHERE agent IS NULL AND page_type='general'"
+            "SELECT count(*) FROM pages WHERE agent IS NULL"
         ).fetchone()[0]
         open_c = c.execute(
             "SELECT count(*) FROM contradictions WHERE status='open'"
@@ -243,7 +251,7 @@ def _run_bg(cmd: list[str], label: str, log_file: Path | None, timeout: int = 60
                 _log(f"  [{label}] OK — {tail}", log_file)
             else:
                 err = ((r.stderr or "") + (r.stdout or "")).strip()
-                _log(f"  [{label}] ERROR rc={r.returncode} {err[:200]}", log_file)
+                _log(f"  [{label}] ERROR rc={r.returncode} {err[:2000]}", log_file)
         except Exception as e:
             _log(f"  [{label}] EXCEPTION {e}", log_file)
 
@@ -295,10 +303,16 @@ def _run_harness_bg(harness_name: str, log_file: Path | None,
                         _hcfg = _yaml.safe_load(_hcfg_path.read_text()) or {}
                         _master_key = _hcfg.get("model", {}).get("api_key", "")
                 if _master_key:
+                    os.environ.setdefault("NOVA_LLM_PROVIDER", "hmg")
+                    os.environ.setdefault("NOVA_LLM_BASE_URL", "https://h-chat-api.autoever.com/claude-code/v2")
+                    os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-4-6")
+                    # setdefault 대신 강제 덮어쓰기: 셸에서 구키가 export된 채로
+                    # watcher를 시작해도 .env/.config.yaml의 최신 키가 항상 우선함
                     for _var in ("NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
                                  "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY",
-                                 "NOVA_CODEX_API_KEY", "NOVA_IMAGE_GEN_API_KEY"):
-                        os.environ.setdefault(_var, _master_key)
+                                 "NOVA_CODEX_API_KEY", "NOVA_IMAGE_GEN_API_KEY",
+                                 "HERMES_MASTER_APIKEY"):
+                        os.environ[_var] = _master_key
             except Exception:
                 pass  # API key 주입 실패해도 계속 진행
 
@@ -328,15 +342,48 @@ def _run_harness_bg(harness_name: str, log_file: Path | None,
                 if not _kb_py:
                     _kb_py = _sys.executable
                 sync_r = subprocess.run(
-                    [_kb_py, str(hermes_bin / "nova_kb_sync.py")],
+                    [_kb_py, str(hermes_bin / "nova_kb_sync.py"), "--no-embed"],
                     env={**os.environ,
                          "HERMES_HOME": str(hermes_home),
                          "NOVA_HOME":   str(nova_home),
                          "PYTHONPATH":  str(hermes_bin) + ":" + str(nova_src)},
-                    capture_output=True, text=True, timeout=60,
+                    capture_output=True, text=True, timeout=120,
                 )
                 if sync_r.returncode == 0:
                     _log(f"  [harness:{harness_name}] kb_sync 완료 → brain.db 갱신", log_file)
+                    # kb_harvest: harness report.md → KB projects/nova-harness-log.md 갱신
+                    harvest_script = hermes_home / "bin" / "nova_kb_harvest.py"
+                    if harvest_script.exists():
+                        _run_bg([_sys.executable, str(harvest_script)], "kb_harvest", log_file, timeout=30)
+                    # kb_sync 성공 후 → claim extract (harness report.md → takes 자동 생성)
+                    claim_script = hermes_home / "bin" / "nova_kb_claim_extract.py"
+                    if claim_script.exists():
+                        subprocess.run(
+                            [_sys.executable, str(claim_script)],
+                            env={**os.environ, "HERMES_HOME": str(hermes_home), "NOVA_HOME": str(nova_home)},
+                            capture_output=True, text=True, timeout=60,
+                        )
+                        _log(f"  [harness:{harness_name}] claim_extract 완료 → takes 자동 생성", log_file)
+                    # kb_sync 성공 → takes_link 즉시 실행 (coverage 개선)
+                    import pathlib as _pathlib
+                    takes_link_script = _pathlib.Path.home() / ".nova/engines/takes_link.py"
+                    if takes_link_script.exists():
+                        subprocess.run(
+                            [_sys.executable, str(takes_link_script)],
+                            env={**os.environ, "NOVA_HOME": str(nova_home)},
+                            capture_output=True, text=True, timeout=30,
+                        )
+                        # 이중실행 방지: state 파일에 last_takes_link 직접 갱신
+                        try:
+                            import json as _json, time as _time
+                            _sf = nova_home / "logs" / "brain_watcher_state.json"
+                            if _sf.exists():
+                                _st = _json.loads(_sf.read_text())
+                                _st["last_takes_link"] = _time.time()
+                                _sf.write_text(_json.dumps(_st, indent=2))
+                        except Exception:
+                            pass
+                        _log(f"  [harness:{harness_name}] takes_link 완료 → coverage 개선", log_file)
                 else:
                     _log(f"  [harness:{harness_name}] kb_sync 실패 rc={sync_r.returncode} {(sync_r.stderr or sync_r.stdout)[:100]}", log_file)
             else:
@@ -471,17 +518,100 @@ def _react(
     # takes 20개 이상 누적(synthesize 임계값 15 초과) = 지속적 대화 →
     # research harness로 심화 탐구 → workspace/report.md → kb_sync → brain.db
     if new_takes_for_harness >= R["takes_for_harness"] and _can_act(state, "harness", R["harness_min_s"]):
-        _log(f"  takes +{new_takes_for_harness} (누적) → research harness (자율 지식 생산)", log_file)
+        _log(f"  takes +{new_takes_for_harness} (누적) → harness 라우팅 (자율 지식 생산)", log_file)
         # BUG-HARNESS-TOPIC 수정: brain 상태 기반 topic 자동 생성 ({{topic}} 플레이스홀더 미치환 방지)
         harness_topic = (
             f"NOVA KB 자율 탐구 — 최근 {new_takes_for_harness}개 대화 인사이트 기반 핵심 주제 분석. "
             f"brain.db: takes={brain_now['takes']}, pages={brain_now.get('total_pages', '?')}, "
             f"health={brain_now['health']}"
         )
-        _run_harness_bg("research", log_file, context={"topic": harness_topic})
+        # Phase 4: InterruptRouter 경유 도메인별 harness 라우팅
+        harness_name = "research"  # 기본 폴백
+        try:
+            import sys as _sys
+            _nova_src = str(Path.home() / "nova")
+            if _nova_src not in _sys.path:
+                _sys.path.insert(0, _nova_src)
+            from nova.kernel.interrupt import InterruptRouter
+            from nova.kernel.memory import MemoryLayer
+
+            # brain_db 경로: _react()는 nova_home 인자를 받지 않으므로 환경변수에서 재구성
+            _ir_nova_home = Path(os.environ.get("NOVA_HOME", str(Path.home() / ".nova"))).expanduser()
+            _ir_brain_db  = str(_ir_nova_home / "brain.db")
+
+            _layer = MemoryLayer(brain_db=_ir_brain_db)
+            _recent_takes = _layer.get_takes(tier="hot",  limit=20)
+            _warm_takes   = _layer.get_takes(tier="warm", limit=30)
+            _router       = InterruptRouter()  # domain_routing.yaml 자동 로드
+            _interrupts   = _router.classify(_warm_takes + _recent_takes)  # warm(old) + hot(new)
+
+            if _interrupts:
+                _intr       = _interrupts[0]  # 최우선 1개
+                harness_name = _router.route(_intr)
+                _log(
+                    f"  interrupt: {_intr.kind.value} domain={_intr.domain} "
+                    f"conf={_intr.confidence:.2f} → {harness_name}",
+                    log_file,
+                )
+            else:
+                _log("  interrupt: 도메인 미매칭 → research 폴백", log_file)
+        except Exception as _ie:
+            _log(f"  interrupt 실패(폴백 research): {_ie}", log_file)
+
+        _run_harness_bg(harness_name, log_file, context={"topic": harness_topic})
         state["last_harness"] = time.time()
         state["takes_at_last_harness"] = brain_now["takes"]  # BUG-HARNESS-RESET: 영속화
-        acted.append("harness_research")
+        acted.append(f"harness_{harness_name}")
+
+    # ── Phase 2: nova_events 'spawn' 폴링 → 실제 harness 실행 (I-3 해결) ──────
+    # KernelAPI.spawn()은 nova_events에 INSERT만 함. 이 블록이 실제 실행을 담당.
+    # nova_events 컬럼: id, event_type, severity, title, detail, source, created_at, is_read, source_agent
+    # is_read=0 인 spawn 이벤트를 폴링하고 harness를 실행한 뒤 is_read=1로 마킹.
+    try:
+        import sqlite3 as _sqlite3
+        # _react()는 nova_home 인자를 받지 않으므로 환경변수에서 재구성
+        _ne_nova_home = Path(os.environ.get("NOVA_HOME", str(Path.home() / ".nova"))).expanduser()
+        _ne_db_path = _ne_nova_home / "brain.db"
+        _ne_conn = _sqlite3.connect(str(_ne_db_path), timeout=3)
+        _ne_conn.execute("PRAGMA busy_timeout=2000")
+        _spawn_rows = _ne_conn.execute(
+            "SELECT id, title, detail, source_agent FROM nova_events "
+            "WHERE event_type='spawn' AND is_read=0 "
+            "ORDER BY created_at ASC LIMIT 5"
+        ).fetchall()
+        for _ne_id, _ne_title, _ne_detail, _ne_source in _spawn_rows:
+            # title 형식: "spawn:<harness_name>" 또는 harness명 직접
+            _harness_name = _ne_title or ""
+            if _harness_name.startswith("spawn:"):
+                _harness_name = _harness_name.split(":", 1)[1]
+            _harness_name = _harness_name.strip() or "research"
+            _ne_topic = (
+                str(_ne_detail or "").strip()[:120]
+                or f"nova_events spawn: {_harness_name}"
+            )
+            if _can_act(state, f"spawn_{_harness_name}", R.get("harness_min_s", 1200)):
+                _log(
+                    f"  [nova_events] spawn({_harness_name}) from {_ne_source} — topic: {_ne_topic[:60]}",
+                    log_file,
+                )
+                _run_harness_bg(_harness_name, log_file, context={"topic": _ne_topic})
+                state[f"last_spawn_{_harness_name}"] = time.time()
+                acted.append(f"spawn_{_harness_name}")
+            else:
+                _log(
+                    f"  [nova_events] spawn({_harness_name}) 쿨다운 중 — 스킵",
+                    log_file,
+                )
+            # 처리 완료 마킹 (is_read=1)
+            _ne_conn.execute(
+                "UPDATE nova_events SET is_read=1 WHERE id=?",
+                (_ne_id,),
+            )
+        if _spawn_rows:
+            _ne_conn.commit()
+        _ne_conn.close()
+    except Exception as _ne_err:
+        _log(f"  [nova_events] 폴링 실패 (무시): {_ne_err}", log_file)
 
     # Cascade: wiki crosslink (after synthesize or dream)
     if any(a in acted for a in ["synthesize", "dream_takes", "dream_critical"]):
@@ -571,6 +701,29 @@ def run(
     # nova_home = ~/.nova, hermes_home = ~/.hermes
     # 실제 kanban DB: ~/.hermes/kanban/boards/<board>/kanban.db
     hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+
+    # [BUG-FIX] watcher 시작 즉시 .env / config.yaml에서 최신 키 강제 주입
+    # os.environ.setdefault()는 셸에서 구키가 export된 경우 무시됨 → 강제 덮어쓰기 필요
+    try:
+        import yaml as _yaml
+        _env_path = hermes_home / ".env"
+        _master_key = ""
+        if _env_path.exists():
+            for _line in _env_path.read_text(errors="replace").splitlines():
+                _line = _line.strip()
+                if _line.startswith("HERMES_MASTER_APIKEY="):
+                    _master_key = _line.split("=", 1)[1].strip()
+                    break
+        if not _master_key:
+            _hcfg = _yaml.safe_load((hermes_home / "config.yaml").read_text()) or {}
+            _master_key = _hcfg.get("model", {}).get("api_key", "")
+        if _master_key:
+            for _var in ("HERMES_MASTER_APIKEY", "NOVA_LLM_API_KEY", "HMG_API_KEY",
+                         "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY",
+                         "NOVA_CODEX_API_KEY", "NOVA_IMAGE_GEN_API_KEY"):
+                os.environ[_var] = _master_key
+    except Exception:
+        pass
     kanban_root = hermes_home / "kanban" / "boards"
     # fallback: nova_home에도 kanban이 있으면 함께 감시
     nova_kanban_root = nova_home / "kanban" / "boards"
@@ -601,6 +754,7 @@ def run(
         "fix_orphan":  [sys.executable, str(engines_dir / "fix_orphan.py")],
         "memory_slim": [sys.executable, str(engines_dir / "memory_slim.py")],
         "takes_link":  [sys.executable, str(engines_dir / "takes_link.py")],  # orphan takes → pages 자동연결
+        "kb_harvest":  [sys.executable, str(hermes_home / "bin" / "nova_kb_harvest.py")],  # harness report → KB
     }
     if engines:
         default_engines.update(engines)
@@ -639,6 +793,9 @@ def run(
         if "chain" in active_engines and _can_act(state, "chain", 0):  # startup은 cooldown 무시
             _run_bg(active_engines["chain"], "chain_engine", log_file, timeout=3600)
             state["last_chain"] = time.time()
+
+    _last_cron_tick = 0.0
+    _CRON_INTERVAL  = 3600  # 1시간마다 cron_tick 실행
 
     while True:
         proc = _spawn_inotify(watch_dirs)
@@ -723,6 +880,21 @@ def run(
                 except Exception:
                     pass
             time.sleep(1)
+            # ── cron_tick: 1시간마다 자율 harness 트리거 (사용자 비활성 시에도 지식 성장) ──
+            if _CRON_ENGINE_AVAILABLE and time.time() - _last_cron_tick >= _CRON_INTERVAL:
+                _last_cron_tick = time.time()
+                try:
+                    _cron_tick(
+                        brain_db=str(nova_home / "brain.db"),
+                        run_harness_fn=lambda name: (
+                            # _run_harness_bg는 None 반환 — 백그라운드 제출 자체를 성공으로 처리
+                            # 실제 성공 여부는 cron_engine 쿨다운 + brain_watcher 로그로 추적
+                            _run_harness_bg(name, log_file, timeout=300) is not None or True
+                        ),
+                        log_fn=lambda msg: _log(msg, log_file),
+                    )
+                except Exception as _ce:
+                    _log(f"  [cron_engine] 예외: {_ce}", log_file)
 
 
 # ── CLI entrypoint ────────────────────────────────────────────────────────────

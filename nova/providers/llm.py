@@ -332,15 +332,19 @@ class EchoProvider(LLMProvider):
 class HMGProvider(LLMProvider):
     """Direct httpx provider for HMG Anthropic-compatible endpoint."""
 
+    _MAX_KEY_RETRIES = 3
+
     def __init__(self, cfg) -> None:
         import httpx
-        self._key = cfg.api_key or ""
+        # CRITICAL-4 FIX: _KeyRotator 통합 — 429/401 시 keys.json round-robin 순환
+        self._rotator = _KeyRotator(cfg.api_key or "")
+        self._key = self._rotator.current()
         raw = cfg.base_url or "https://h-chat-api.autoever.com/claude-code/v2"
         self._base = raw.rstrip("/").removesuffix("/v1")
         self.model = cfg.model or "claude-sonnet-4-6"
         self.max_tokens = getattr(cfg, "max_tokens", 4096)
         self.temperature = getattr(cfg, "temperature", 0.7)
-        self._client = httpx.Client(timeout=getattr(cfg,"timeout",120) or 120)
+        self._client = httpx.Client(timeout=getattr(cfg, "timeout", 120) or 120)
 
     def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
         messages = []
@@ -365,18 +369,41 @@ class HMGProvider(LLMProvider):
         payload = {"model": self.model, "max_tokens": self.max_tokens, "messages": chat_msgs}
         if system_text:
             payload["system"] = system_text
-        headers = {
-            "x-api-key": self._key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        try:
-            r = self._client.post(f"{self._base}/v1/messages", headers=headers, json=payload, timeout=timeout)
-            r.raise_for_status()
-            data = r.json()
-            return data["content"][0]["text"]
-        except Exception as e:
-            raise RuntimeError(f"HMG API error: {e}") from e
+
+        last_exc: Exception | None = None
+        for attempt in range(self._MAX_KEY_RETRIES):
+            self._key = self._rotator.current()
+            headers = {
+                "x-api-key": self._key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            try:
+                r = self._client.post(
+                    f"{self._base}/v1/messages", headers=headers,
+                    json=payload, timeout=timeout,
+                )
+                if r.status_code in (429, 401):
+                    # 429: Rate limit  /  401: 만료 키 → 다음 키로 rotate
+                    if self._rotator.total() > 1:
+                        new_key = self._rotator.rotate()
+                        logger.warning(
+                            "[nova/hmg] HTTP %d (attempt %d/%d), 키 rotate → ...%s",
+                            r.status_code, attempt + 1, self._MAX_KEY_RETRIES, new_key[-8:],
+                        )
+                        last_exc = RuntimeError(f"HMG HTTP {r.status_code}")
+                        continue
+                    else:
+                        logger.warning("[nova/hmg] HTTP %d — 대체 키 없음", r.status_code)
+                r.raise_for_status()
+                data = r.json()
+                return data["content"][0]["text"]
+            except RuntimeError:
+                raise
+            except Exception as e:
+                last_exc = e
+                break
+        raise RuntimeError(f"HMG API error (모든 키 소진): {last_exc}") from last_exc
 
 
 def get_llm_provider(cfg: LLMConfig) -> LLMProvider:
