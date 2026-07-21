@@ -67,6 +67,26 @@ domains:
     cooldown_min: 30      # 30분 쿨다운 (긴급도 높음)
     min_matches: 3        # 에러 3개 이상 누적 시 트리거
 
+  security_review:
+    description: "보안 감사 — gstack CSO + STRIDE 위협 모델"
+    keywords:
+      - ["STRIDE", "위협모델", "threat model", "OWASP"]
+      - ["보안취약점", "injection", "XSS", "CSRF", "인증실패"]
+      - ["LLM trust", "prompt injection", "권한 상승"]
+    harness: security_sign_off
+    cooldown_min: 60
+    min_matches: 2
+
+  root_cause:
+    description: "근본원인 분석 — gstack investigate + superpowers systematic-debugging"
+    keywords:
+      - ["근본원인", "root cause", "5 whys", "재현", "reproduction"]
+      - ["왜 발생", "원인 추적", "반복 오류", "지속 실패"]
+      - ["fresh verification", "검증 없이", "완료 선언"]
+    harness: investigate
+    cooldown_min: 45
+    min_matches: 2
+
   teams_bot:
     description: "Teams 챗봇 / MCP 게이트웨이 연동"
     keywords:
