@@ -1,0 +1,47 @@
+name: mms_research
+description: "HMG [REDACTED_FACILITY] MMS/CNC 세탄3 도메인 심층 리서치"
+version: "1.0.0"
+pattern: sequential
+
+phases:
+  - id: kb_context
+    name: "MMS KB 컨텍스트 수집"
+    executor: python
+    command: |
+      # brain.db BM25 검색: MMS/CNC 관련 KB 페이지
+      import os, subprocess, sys, json
+      from pathlib import Path
+      topic = context.get("topic", "MMS CNC 세탄3 분석")
+      hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+      nova_home   = Path(os.environ.get("NOVA_HOME",   str(Path.home() / ".nova"))).expanduser()
+      brain_cli   = hermes_home / "bin" / "nova_brain_cli.py"
+      results = []
+      try:
+          r = subprocess.run(
+              [sys.executable, str(brain_cli), "search", topic, "--top-k", "5"],
+              capture_output=True, text=True, timeout=20,
+              env={**os.environ, "HERMES_HOME": str(hermes_home), "NOVA_HOME": str(nova_home)}
+          )
+          if r.returncode == 0 and r.stdout.strip():
+              results.append(f"## KB BM25 Results\n{r.stdout[:1500]}")
+      except Exception as e:
+          results.append(f"[brain_cli 오류: {e}]")
+      output = "\n\n".join(results) if results else "No MMS KB context found."
+    output_file: kb_context.md
+    on_failure: skip
+
+  - id: synthesis
+    name: "MMS/CNC 분석 리포트 합성"
+    executor: llm
+    input_files:
+      - kb_context.md
+    prompt: |
+      당신은 HMG [REDACTED_FACILITY] MMS/CNC 전문가입니다.
+      수집된 KB 컨텍스트를 바탕으로:
+      1. 현재 세탄3 [REDACTED_ENGINE_CODE] 공정 주요 이슈 (파악된 사항)
+      2. 추가 조사가 필요한 영역
+      3. 우선순위 제안
+
+      topic: {{topic}}
+    output_file: report.md
+    on_failure: skip

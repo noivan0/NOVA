@@ -1,0 +1,14 @@
+Analyze the following task requirements and break them down into implementation steps.
+
+Task: {{topic}}
+
+## Shared KB Context
+{{kb_context}}
+
+Provide:
+1. Technical requirements analysis
+2. Implementation approach (step by step)
+3. Key considerations and edge cases
+4. Expected outputs
+
+Be concise and actionable.

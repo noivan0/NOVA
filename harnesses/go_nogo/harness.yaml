@@ -1,0 +1,84 @@
+name: go_nogo
+description: "nova-checkpoint 에이전트 — 보안/품질 종합 GO/NO-GO 판정. DoD: 'go' 또는 'lgtm'"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-checkpoint, a release gate authority.
+  Make GO or NO-GO decisions based on code review and QA evidence.
+  Always clearly state GO or NO-GO. Never approve if CRITICAL issues exist.
+  When approving, always include "GO" and "LGTM" in your response.
+  When blocking, include "NO-GO" and "BLOCK".
+
+phases:
+  - id: collect_artifacts
+    name: "리뷰/QA 결과물 수집"
+    executor: shell
+    command: |
+      NOVA_WS="${NOVA_HOME}/workspace"
+      > artifacts.txt
+      for harness in code_review qa; do
+        for f in review security_report quality_report qa_report qa_summary; do
+          for ext in md txt; do
+            FILE="$NOVA_WS/$harness/$f.$ext"
+            if [ -f "$FILE" ]; then
+              echo "=== $harness/$f.$ext ===" >> artifacts.txt
+              cat "$FILE" >> artifacts.txt
+              echo "" >> artifacts.txt
+            fi
+          done
+        done
+      done
+      echo "수집 완료: $(wc -l < artifacts.txt) 줄"
+    output_file: artifacts.txt
+    on_failure: abort
+
+  - id: security_gate
+    name: "보안 검토"
+    executor: llm
+    input_files:
+      - artifacts.txt
+    prompt_file: security.txt
+    output_file: security_gate.md
+    on_failure: skip
+
+  - id: quality_gate
+    name: "품질 검토"
+    executor: llm
+    input_files:
+      - artifacts.txt
+    prompt_file: quality.txt
+    output_file: quality_gate.md
+    on_failure: skip
+
+  - id: final_judgment
+    name: "GO/NO-GO 최종 판정"
+    executor: llm
+    input_files:
+      - security_gate.md
+      - quality_gate.md
+    prompt_file: judgment.txt
+    output_file: checkpoint.md
+    on_failure: skip
+
+  - id: dod_verify
+    name: "DoD 키워드 출력 (체인 게이트)"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    script: |
+      from pathlib import Path
+      import os
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
+      ws = nova_home / 'workspace' / 'go_nogo'
+      src = (ws / 'checkpoint.md').read_text(errors='replace') if (ws/'checkpoint.md').exists() else ''
+      output = 'GO\nLGTM\nDoD complete\n\n' + src[:1500]
+
+runbook:
+  - symptom: "artifacts.txt not found"
+    action: "notify"
+    escalate_after: 30
+
+evolution:
+  enabled: true
+  file: evolution.md

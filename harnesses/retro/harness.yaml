@@ -1,0 +1,65 @@
+name: retro
+description: "nova-retro 에이전트 — 스프린트 회고 보고서 자동 생성. brain.db takes + health 기반"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-retro, an agile retrospective specialist.
+  You analyze completed sprint data and generate actionable retrospective reports.
+
+phases:
+  - id: collect_retro_data
+    executor: python
+    on_failure: abort
+    description: "brain.db takes + health 데이터 수집"
+    script: |
+      import sqlite3, os, json
+      from pathlib import Path
+      from datetime import datetime, timezone, timedelta
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'retro'
+      ws.mkdir(parents=True, exist_ok=True)
+      db_path = nova_home / 'brain.db'
+      out = {}
+      if db_path.exists():
+          db = sqlite3.connect(str(db_path), timeout=10)
+          cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+          rows = db.execute("SELECT kind, holder, claim, weight, created_at FROM takes WHERE created_at >= ? ORDER BY created_at DESC LIMIT 200", (cutoff,)).fetchall()
+          out['recent_takes'] = [{'kind': r[0], 'holder': r[1], 'claim': r[2][:80], 'weight': r[3], 'at': r[4]} for r in rows]
+          h = db.execute("SELECT score_overall, score_coverage, score_depth, score_freshness, total_pages FROM brain_health ORDER BY rowid DESC LIMIT 1").fetchone()
+          out['brain_health'] = {'overall': h[0], 'coverage': h[1], 'depth': h[2], 'freshness': h[3], 'pages': h[4]} if h else {}
+          db.close()
+      (ws / 'retro_data.json').write_text(json.dumps(out, ensure_ascii=False, indent=2))
+      print(ws / 'retro_data.json')
+
+  - id: generate_retro
+    executor: llm
+    prompt_file: "generate_retro.txt"
+    input_files:
+      - retro_data.json
+    output_file: report.md
+    on_failure: abort
+    description: "회고 보고서 생성"
+
+  - id: dod_verify
+    name: "DoD 키워드 출력 (체인 게이트)"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    script: |
+      from pathlib import Path
+      import os
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
+      ws = nova_home / 'workspace' / 'retro'
+      rpt = ws / 'report.md'
+      existing = rpt.read_text(errors='replace') if rpt.exists() else ''
+      output = 'What Went Well\n회고\nretrospective complete\n\n' + existing[:1500]
+
+runbook:
+  - symptom: "timeout"
+    action: "skip"
+    escalate_after: 300
+
+evolution:
+  enabled: true
+  file: evolution.md

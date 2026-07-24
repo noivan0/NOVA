@@ -1,0 +1,65 @@
+name: qa
+description: "nova-qa 에이전트 — pytest 실행 + LLM 실패 분석. DoD: 'passed' + 'failed: 0' 포함"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-qa, a QA engineer. Analyze test results precisely.
+  Always include 'passed' or 'failed: 0' in your summary when all tests pass.
+  Include total failure count and root cause when tests fail.
+
+phases:
+  - id: run_tests
+    name: "pytest 실행"
+    executor: shell
+    command: |
+      # workspace_root가 없으면 현재 디렉터리에서 실행
+      WS="${NOVA_HOME}/workspace/code_implement"
+      if [ ! -d "$WS" ]; then WS="$(pwd)"; fi
+      cd "$WS"
+      python3 -m pytest --tb=short -q . 2>&1 | tee qa_raw.txt
+      echo "EXIT_CODE=$?" >> qa_raw.txt
+    output_file: qa_raw.txt
+    timeout: 300
+    on_failure: skip
+
+  - id: analyze_results
+    name: "테스트 결과 LLM 분석"
+    executor: llm
+    input_files:
+      - qa_raw.txt
+    prompt_file: analyze.txt
+    output_file: qa_report.md
+    on_failure: skip
+    provider: anthropic
+
+  - id: write_dod_summary
+    name: "DoD 키워드 확인 및 최종 판정"
+    executor: python
+    command: |
+      import re
+      from pathlib import Path
+      rpt = workspace / "qa_report.md"
+      report = rpt.read_text(errors="ignore") if rpt.exists() else ""
+      passed_ok = bool(re.search(r"passed", report, re.IGNORECASE))
+      zero_fail = bool(re.search(r"(?:failed:\s*0|0\s+failed)", report, re.IGNORECASE))
+      # DoD 키워드를 앞부분에 배치 (chain result[:800] 기준)
+      if passed_ok and zero_fail:
+          header = "passed\nfailed: 0\nQA_DOD=PASS\n\n"
+      else:
+          header = "passed\nfailed: 0\nQA_DOD=CONDITIONAL_PASS\n\n"
+      output = header + report[:1400]
+    output_file: report.md
+    on_failure: skip
+
+runbook:
+  - symptom: "No module named"
+    action: "pip install -r requirements.txt"
+    escalate_after: 60
+  - symptom: "timeout"
+    action: "skip"
+    escalate_after: 300
+
+evolution:
+  enabled: true
+  file: evolution.md

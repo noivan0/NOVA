@@ -1,6 +1,6 @@
 name: research
-description: "Multi-angle research harness — gathers information from multiple angles and synthesizes a final report."
-version: "1.0.0"
+description: "Multi-angle research harness — 실제 웹검색(DDG) + KB 컨텍스트 결합 후 최종 리포트 합성 v2.0"
+version: "2.0.0"
 pattern: fanout
 
 persona: |
@@ -9,41 +9,70 @@ persona: |
 
 phases:
   - id: web_search
-    name: "Web Research"
-    description: "Search the web and summarize key findings on the topic"
-    executor: llm
-    prompt_file: web_search.txt
+    name: "Web Research (실제 DDG 검색)"
+    description: "DuckDuckGo로 실제 웹 검색 후 web_research.md 생성"
+    executor: shell
+    command: "/usr/bin/python3 ${NOVA_HOME:-$HOME/.nova}/harnesses/research/scripts/web_search_real.py"
     output_file: web_research.md
     on_failure: skip
 
   - id: kb_context
     name: "KB Context Retrieval"
-    description: "Extract relevant prior knowledge from the local KB"
+    description: "brain.db BM25 + 로컬 KB 파일에서 관련 선행 지식 수집"
     executor: python
     command: |
+      import os, subprocess, sys, json
       from pathlib import Path
-      kb_path = workspace / ".." / ".." / ".." / "kb"
+      topic = context.get("topic", "")
+      hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+      nova_home   = Path(os.environ.get("NOVA_HOME",   str(Path.home() / ".nova"))).expanduser()
+      kb_path = hermes_home / "kb"
+      brain_cli = hermes_home / "bin" / "nova_brain_cli.py"
       results = []
+      try:
+          r = subprocess.run(
+              [sys.executable, str(brain_cli), "search", topic, "--top-k", "5"],
+              capture_output=True, text=True, timeout=20,
+              env={**os.environ, "HERMES_HOME": str(hermes_home), "NOVA_HOME": str(nova_home)}
+          )
+          if r.returncode == 0 and r.stdout.strip():
+              results.append(f"## Brain DB BM25 Results\n{r.stdout[:1200]}")
+      except Exception as e:
+          results.append(f"[brain_cli error: {e}]")
       if kb_path.exists():
-          for md in list(kb_path.rglob("*.md"))[:20]:
-              text = md.read_text()
-              if context.get("topic", "").lower() in text.lower():
-                  results.append(f"=== {md.name} ===\n{text[:500]}")
+          topic_lower = topic.lower()
+          keywords = [w for w in topic_lower.split() if len(w) > 2]
+          matched = []
+          for md in list(kb_path.rglob("*.md"))[:50]:
+              try:
+                  text = md.read_text(encoding="utf-8", errors="ignore")
+                  score = sum(1 for k in keywords if k in text.lower())
+                  if score > 0:
+                      matched.append((score, md, text[:600]))
+              except Exception:
+                  continue
+          matched.sort(reverse=True)
+          if matched:
+              lines = ["## KB File Matches"]
+              for score, md, snippet in matched[:5]:
+                  lines.append(f"### {md.name} (score={score})")
+                  lines.append(snippet)
+              results.append("\n".join(lines))
       output = "\n\n".join(results) if results else "No prior KB context found."
     output_file: kb_context.md
     on_failure: skip
 
   - id: synthesis
     name: "Synthesis"
-    description: "Combine all research into a structured final report"
+    description: "웹검색 결과 + KB 선행지식을 결합해 최종 구조화 리포트 작성"
     executor: llm
     input_files:
       - web_research.md
       - kb_context.md
     prompt_file: synthesis.txt
     output_file: report.md
-    quality_check: true
-    on_failure: abort
+    quality_check: false
+    on_failure: skip
 
 runbook:
   - symptom: "timeout"

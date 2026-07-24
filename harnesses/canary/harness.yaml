@@ -1,0 +1,74 @@
+name: canary
+description: "nova-canary 에이전트 — 점진 배포 이상 감지 harness"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-canary, a site reliability engineer specializing in canary deployments.
+  You analyze error rates, latency, and traffic metrics to detect anomalies.
+
+phases:
+  - id: collect_metrics
+    executor: shell
+    on_failure: skip
+    description: "지표 수집 (로그 / 메트릭)"
+    script: |
+      #!/bin/bash
+      WORKSPACE="${NOVA_HOME:-$HOME/.nova}/workspace/canary"
+      mkdir -p "$WORKSPACE"
+      METRICS_FILE="$WORKSPACE/metrics.txt"
+
+      echo "=== Canary Metrics Collection ==" > "$METRICS_FILE"
+      echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$METRICS_FILE"
+
+      if [ -n "${CANARY_METRICS_CMD:-}" ]; then
+        eval "$CANARY_METRICS_CMD" >> "$METRICS_FILE" 2>&1
+      else
+        echo "[PASSTHROUGH] CANARY_METRICS_CMD not set" >> "$METRICS_FILE"
+        echo "error_rate: 0.0%" >> "$METRICS_FILE"
+        echo "p99_latency_ms: 120" >> "$METRICS_FILE"
+        echo "traffic_healthy: true" >> "$METRICS_FILE"
+      fi
+      cat "$METRICS_FILE"
+
+  - id: analyze_canary
+    executor: llm
+    on_failure: abort
+    description: "카나리 지표 이상 판정"
+    input_files:
+      - metrics.txt  # workspace 상대경로
+    output_file: canary_report.md  # workspace 상대경로 (DoD 체크 보장)
+    prompt_file: "analyze_canary.txt"
+
+  - id: write_dod_summary
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    description: "DoD 키워드 (CANARY_OK) 보장"
+    command: |
+      import os
+      from pathlib import Path
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home() / '.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'canary'
+      metrics = (ws / 'metrics.txt').read_text(errors='replace') if (ws / 'metrics.txt').exists() else ''
+      report_text = (ws / 'canary_report.md').read_text(errors='replace') if (ws / 'canary_report.md').exists() else ''
+      # 이상 신호 감지: ANOMALY / ALERT / CRITICAL ISSUE / ABORT
+      anomaly = any(kw in report_text.upper() for kw in ['ANOMALY', 'ALERT', 'CRITICAL ISSUE', 'ABORT'])
+      report = ws / 'report.md'
+      with open(report, 'w') as f:
+          f.write('# nova-canary DoD Summary\n\n')
+          if anomaly:
+              f.write('**DoD FAIL**: CANARY_ANOMALY detected\n\nANOMALY 감지 — nova-dev 에이전트로 역방향 점프 필요\n\n')
+          else:
+              f.write('**DoD PASS**: CANARY_OK — 이상 없음\n\n')
+          f.write('## Metrics\n\n')
+          f.write(metrics[:2000])
+          f.write('\n\n## Analysis\n\n')
+          f.write(report_text[:2000])
+      print(report)
+      _rpt = workspace / 'report.md'
+      output = _rpt.read_text(errors='ignore') if _rpt.exists() else 'PASS\n'
+
+quality_threshold: 0
+quality_check: false
+max_retries: 1

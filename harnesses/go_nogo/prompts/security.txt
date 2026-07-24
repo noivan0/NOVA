@@ -1,0 +1,22 @@
+수집된 리뷰 결과에서 보안 이슈를 평가하라.
+
+## Shared KB Context
+{{kb_context}}
+
+리뷰 결과:
+{{artifacts.txt}}
+
+평가 결과를 아래 형식으로 작성하라:
+
+## 보안 평가
+
+- CRITICAL 이슈 수: CRITICAL=N
+- HIGH 이슈 수: HIGH=N
+- MEDIUM 이슈 수: MEDIUM=N
+
+## 주요 이슈 목록
+(각 이슈: 심각도 / 내용 / 권고조치)
+
+## 보안 판정
+- PASS (CRITICAL=0, HIGH<3) 또는
+- FAIL (CRITICAL>0 또는 HIGH>=3)

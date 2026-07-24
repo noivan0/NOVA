@@ -64,6 +64,9 @@ HARNESS_AGENTS = {
     "nova-sysaudit":         "system_audit",
     # 자율 장애 조사 (5 Whys RCA) — CHAIN_FAIL 폴백 에이전트
     "nova-investigate":  "investigate",
+    # ── superpowers 신규 harness ────────────────────────────────────
+    # 완료 주장 전 신선한 검증 강제 (superpowers Iron Law)
+    "nova-validator":    "verification_gate",
     # ── 사이드체인 에이전트 (5개) ──────────────────────────────
     "nova-marketing":    "go_nogo",           # 시장 가치 검증
     "nova-strategy":     "document_gen",      # 전략 문서
@@ -111,7 +114,7 @@ def _execute_harness_for_agent(agent: str, context: dict = None) -> bool:
                          "HERMES_HOME": str(hermes_home),
                          "NOVA_HOME":   str(nova_home),
                          "PYTHONPATH":  str(hermes_bin)+":"+str(nova_src)},
-                    capture_output=True, text=True, timeout=60,
+                    capture_output=True, text=True, timeout=120,
                 )
                 if sync_r.returncode == 0:
                     break
@@ -560,19 +563,38 @@ def detect_loop(tasks: list, candidate_agent: str) -> bool:
 
 
 ASSIGN_RULES = [
+    # ── 기존 규칙 ────────────────────────────────────────────────
     (["배포", "deploy", "docker", "서버"], "nova-ship"),
     (["테스트", "test", "pytest", "coverage", "qa"], "nova-qa"),
-    (["보안", "security", "OWASP", "취약", "cso"], "nova-cso"),
     (["문서", "document", "docs", "release note"], "nova-document"),
     (["감사", "review", "코드 리뷰", "PR"], "nova-review"),
     (["구현", "implement", "개발", "기능", "dev"], "nova-dev"),
     (["성능", "benchmark", "metric", "DORA"], "nova-benchmark"),
     (["canary", "SLO", "헬스", "health", "watchdog"], "nova-health"),
     (["마케팅", "marketing", "SEO", "GEO", "블로그"], "nova-marketing"),
-    (["조사", "investigate", "RCA", "원인"], "nova-investigate"),
     (["계획", "plan", "sprint", "스프린트", "autoplan"], "nova-autoplan"),
     (["학습", "learn", "evolution", "패턴"], "nova-learn"),
     (["회고", "retro", "retrospective", "KPI"], "nova-retro"),
+
+    # ── gstack 트리거 키워드 (강화된 보안/조사) ─────────────────────
+    # gstack CSO: OWASP + STRIDE 통합 보안 감사
+    (["보안", "security", "OWASP", "취약", "cso", "STRIDE", "위협모델",
+      "injection", "xss", "csrf", "취약점", "penetration", "pentest",
+      "보안감사", "trust boundary", "LLM trust", "spoofing", "tampering"], "nova-cso"),
+    # gstack Iron Law 조사: 근본원인, 3회 실패
+    (["조사", "investigate", "RCA", "원인", "root cause", "근본원인",
+      "5 whys", "whys", "디버그", "debug", "버그원인", "장애원인",
+      "재현", "reproduce", "증상", "symptom", "실패원인"], "nova-investigate"),
+    # gstack review: CI 통과 후 프로덕션 버그 탐지
+    (["staff engineer", "production bug", "코드감사", "sql injection",
+      "completeness gap", "side effect", "conditional bug",
+      "TODO 확인", "placeholder 확인"], "nova-review"),
+
+    # ── superpowers 트리거 키워드 (신규 harness 라우팅) ───────────────
+    # verification_gate: 완료 주장 전 검증 강제
+    (["검증", "verify", "verification", "완료 확인", "done 확인",
+      "fresh verification", "완료 전 검증", "테스트 통과 확인",
+      "빌드 확인", "완료 주장"], "nova-validator"),
 ]
 
 def auto_assign_agent(title: str, body: str) -> str | None:
@@ -581,6 +603,52 @@ def auto_assign_agent(title: str, body: str) -> str | None:
         if any(kw.lower() in text for kw in keywords):
             return agent
     return None
+
+
+# ============================================================
+# active=1 고착 자동 복구 (BUG-FAIL-3)
+# ============================================================
+def _recover_stuck_loop(board: str) -> None:
+    """active=1이고 running 태스크가 10분 이상 고착 → kanban block 후 역방향 복구 트리거."""
+    import time as _time
+    try:
+        r = subprocess.run(
+            ["hermes", "kanban", "--board", board, "list", "--json"],
+            capture_output=True, text=True, timeout=10
+        )
+        if r.returncode != 0:
+            return
+        tasks = json.loads(r.stdout)
+        active_cnt  = sum(1 for t in tasks if t.get("status") == "running")
+        running_tasks = [t for t in tasks if t.get("status") == "running"]
+        if active_cnt != 1 or not running_tasks:
+            return
+        task = running_tasks[0]
+        started_raw = task.get("started_at") or task.get("created_at") or 0
+        if not started_raw:
+            return
+        # ISO 문자열 또는 unix timestamp 처리
+        if isinstance(started_raw, str):
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                started_ts = _dt.fromisoformat(started_raw.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return
+        else:
+            started_ts = float(started_raw)
+        elapsed = _time.time() - started_ts
+        if elapsed >= 600:  # 10분 이상 고착
+            agent   = task.get("assignee", "unknown")
+            task_id = task.get("id", "")
+            log(f"  [STUCK-RECOVER] {agent} {elapsed/60:.1f}분 고착 → kanban block")
+            subprocess.run(
+                ["hermes", "kanban", "--board", board, "block", task_id,
+                 f"auto-recover: {elapsed/60:.0f}분 고착"],
+                capture_output=True, timeout=5
+            )
+            log(f"  [STUCK-RECOVER] block 완료 → run_chain에서 역방향 처리 예정")
+    except Exception as _e:
+        log(f"  [STUCK-RECOVER-ERR] {board}: {_e}")
 
 
 # ============================================================
@@ -608,7 +676,10 @@ def run_chain(board: str):
     now = time.time()
     done_tasks    = [t for t in tasks if t.get("status") == "done"]
     # cancelled는 수동 중단 의사 표현 — 자동 역방향 점프 대상 제외 (BUG-B1 수정)
-    failed_tasks  = [t for t in tasks if t.get("status") in ("failed", "blocked")]
+    # blocked는 failed와 분리: EXTERNAL_DEPENDENCY/DoD-stall은 역방향 점프 대상 아님
+    # blocked → stalled_tasks로 분리 처리 (nova-cso DoD 순환 폭발 방지)
+    failed_tasks  = [t for t in tasks if t.get("status") == "failed"]
+    stalled_tasks = [t for t in tasks if t.get("status") == "blocked"]
     running_tasks = [t for t in tasks if t.get("status") == "running"]
 
     # "현재 처리 중"인 에이전트만 중복 방지 대상
@@ -676,7 +747,7 @@ def run_chain(board: str):
                     continue
                 # 이미 join 태스크가 없는 경우에만 생성 (archived 포함)
                 existing_join = [t for t in tasks if t.get("assignee") == join_ag
-                                 and t.get("status") in ACTIVE_STATUSES | {"done", "archived"}]
+                                 and t.get("status") in ACTIVE_STATUSES | {"done"}]
                 if not existing_join:
                     join_title = f"[Join→] {'+'.join(prereqs)} → {join_ag}"
                     join_body  = (
@@ -893,6 +964,15 @@ def run_chain(board: str):
             all_active_assignees.add(fail_ag)
             record_chain_step(board, agent, fail_ag, task_id, "backward_fail")
 
+    # ── ②-b stalled(blocked) → 모니터링만 (역방향 점프 금지)
+    # blocked는 DoD 미달 일시 정지 상태 — 자동 역방향 점프 시 순환 폭발 위험
+    # nova-review/nova-cso가 ready로 바뀌면 체인이 자연스럽게 재시도
+    stalled_cnt = len(stalled_tasks)
+    if stalled_cnt >= 1:
+        stalled_agents = [t.get("assignee") for t in stalled_tasks]
+        lvl = "WARN" if stalled_cnt > 3 else "INFO"
+        log(f"  [STALLED-{lvl}] blocked {stalled_cnt}개: {set(stalled_agents)}" + (" — 수동 확인 권장" if stalled_cnt > 3 else ""))
+
     # ── ③ 병목 감지 (60분+ running → nova-investigate)
     for task in running_tasks:
         started_at = task.get("started_at", 0)
@@ -1031,7 +1111,7 @@ def run_chain(board: str):
     #    harness가 추가되면 HARNESS_AGENTS에 등록 → 이 블록은 자동으로 건너뜀.
     STAGE_ORDER_SET = set(STAGE_ORDER)
     passthrough_count = 0
-    for task in [t for t in tasks
+    for task in [t for t in fresh_tasks  # WARN-4 수정: tasks → fresh_tasks (최신 상태 반영)
                  if t.get("status") == "ready"
                  and t.get("assignee") not in HARNESS_AGENTS
                  and t.get("assignee") in STAGE_ORDER_SET]:
@@ -1128,14 +1208,13 @@ def main():
             try:
                 _db_p = Path(os.environ.get("HERMES_HOME", str(Path.home()/".hermes"))) / "kanban/boards" / board / "kanban.db"
                 if _db_p.exists():
-                    _db = sqlite3.connect(str(_db_p), timeout=3)
-                    _done_cnt = _db.execute("SELECT COUNT(*) FROM tasks WHERE status='done'").fetchone()[0]
-                    _db.close()
+                    with sqlite3.connect(str(_db_p), timeout=3) as _db:
+                        _done_cnt = _db.execute("SELECT COUNT(*) FROM tasks WHERE status='done'").fetchone()[0]
                     if _done_cnt > 60:
-                        _old = sqlite3.connect(str(_db_p), timeout=3).execute(
-                            "SELECT id FROM tasks WHERE status='done' ORDER BY created_at ASC LIMIT ?",
-                            (_done_cnt - 30,)).fetchall()
-                        sqlite3.connect(str(_db_p), timeout=3).close()
+                        with sqlite3.connect(str(_db_p), timeout=3) as _conn2:
+                            _old = _conn2.execute(
+                                "SELECT id FROM tasks WHERE status='done' ORDER BY created_at ASC LIMIT ?",
+                                (_done_cnt - 30,)).fetchall()
                         for (_tid,) in _old:
                             subprocess.run(["hermes", "kanban", "--board", board, "archive", _tid],
                                 capture_output=True, timeout=5)
@@ -1144,6 +1223,8 @@ def main():
                 log(f"  [CLEANUP-ERR] {board}: {_e}")
         for board in boards:
             try:
+                # active=1 고착 감지 및 자동 복구 (BUG-FAIL-3)
+                _recover_stuck_loop(board)
                 run_chain(board)
             except Exception as e:
                 log(f"[FATAL] {board}: {e}")

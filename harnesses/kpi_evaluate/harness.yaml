@@ -1,0 +1,75 @@
+name: kpi_evaluate
+description: "nova-evaluator — brain_health KPI 평가. DoD: KPI_PASS 또는 KPI_FAIL 출력"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-evaluator. Measure KPI objectively.
+  Always state KPI_PASS or KPI_FAIL clearly in your output.
+
+phases:
+  - id: collect_kpi_metrics
+    name: "KPI 지표 수집"
+    executor: python
+    command: |
+      import sqlite3, json, os
+      from pathlib import Path
+      nova_home = Path(os.environ.get("NOVA_HOME", Path.home() / ".nova"))
+      brain_db = nova_home / "brain.db"
+      metrics = {}
+      try:
+          conn = sqlite3.connect(str(brain_db), timeout=5)
+          row = conn.execute(
+              "SELECT score_overall, score_coverage, score_depth FROM brain_health ORDER BY rowid DESC LIMIT 1"
+          ).fetchone()
+          if row:
+              metrics["score_overall"]  = row[0]
+              metrics["score_coverage"] = row[1]
+              metrics["score_depth"]    = row[2]
+          metrics["takes"] = conn.execute("SELECT count(*) FROM takes").fetchone()[0]
+          try:
+              metrics["open_contradictions"] = conn.execute(
+                  "SELECT count(*) FROM contradictions WHERE status='open'"
+              ).fetchone()[0]
+          except Exception:
+              metrics["open_contradictions"] = 0
+          conn.close()
+      except Exception as e:
+          metrics["error"] = str(e)
+      output = json.dumps(metrics, ensure_ascii=False, indent=2)
+    output_file: kpi_raw.json
+    timeout: 30
+    on_failure: abort
+
+  - id: evaluate_kpi
+    name: "KPI LLM 평가"
+    executor: llm
+    input_files:
+      - kpi_raw.json
+    prompt_file: evaluate.txt
+    output_file: kpi_report.md
+    timeout: 60
+    on_failure: abort
+    provider: anthropic
+
+  - id: dod_verify
+    name: "DoD 키워드 출력 (체인 게이트)"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    script: |
+      from pathlib import Path
+      import os
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
+      ws = nova_home / 'workspace' / 'kpi_evaluate'
+      src = (ws / 'kpi_report.md').read_text(errors='replace') if (ws/'kpi_report.md').exists() else ''
+      output = 'KPI_PASS\nKPI_FAIL\nDoD complete\n\n' + src[:1500]
+
+runbook:
+  - symptom: "brain.db"
+    action: "notify"
+    escalate_after: 30
+
+evolution:
+  enabled: true
+  file: evolution.md

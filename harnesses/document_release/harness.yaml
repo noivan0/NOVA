@@ -1,0 +1,117 @@
+name: document_release
+description: "nova-document-release 에이전트 — 문서 배포 + 스프린트 루프 완결 트리거"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-document-release, the final stage of the NOVA sprint loop.
+  You publish documentation and signal the start of the next sprint.
+
+phases:
+  - id: publish_docs
+    executor: shell
+    on_failure: skip
+    description: "문서 발행 (git push or wiki sync)"
+    script: |
+      #!/bin/bash
+      WORKSPACE="${NOVA_HOME:-$HOME/.nova}/workspace/document_release"
+      mkdir -p "$WORKSPACE"
+      OUT="$WORKSPACE/release.log"
+      echo "=== Document Release ==" > "$OUT"
+      echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT"
+
+      DOC_SRC="${NOVA_HOME:-$HOME/.nova}/workspace/document_gen/dod_report.md"
+      KB_DIR="${HERMES_HOME:-$HOME/.hermes}/kb"
+
+      if [ -f "$DOC_SRC" ]; then
+        mkdir -p "$KB_DIR"
+        cp "$DOC_SRC" "$KB_DIR/sprint_release_notes.md"
+        echo "[RELEASE] 문서 KB 발행 완료: $KB_DIR/sprint_release_notes.md" >> "$OUT"
+      else
+        echo "[PASSTHROUGH] 문서 소스 없음 — release 패스스루" >> "$OUT"
+      fi
+
+      if [ -n "${DOC_RELEASE_CMD:-}" ]; then
+        echo "[CMD] $DOC_RELEASE_CMD" >> "$OUT"
+        eval "$DOC_RELEASE_CMD" 2>&1 >> "$OUT" || true
+      fi
+      echo "release: complete" >> "$OUT"
+      cat "$OUT"
+
+  - id: signal_next_sprint
+    executor: python
+    on_failure: skip
+    description: "brain.db에 다음 스프린트 시작 시그널 기록"
+    script: |
+      import sqlite3, os, uuid
+      from pathlib import Path
+      from datetime import datetime, timezone
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      db_path = nova_home / 'brain.db'
+      if db_path.exists():
+          db = sqlite3.connect(str(db_path), timeout=10)
+          db.execute('PRAGMA journal_mode=WAL')
+          now = datetime.now(timezone.utc).isoformat()
+          tid = uuid.uuid4().hex[:16]
+          db.execute(
+              'INSERT INTO takes (id,page_id,kind,holder,claim,weight,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+              (tid, None, 'event', 'nova-document-release',
+               '[sprint-complete] 릴리스 완료 — 다음 스프린트 시작', 0.9, now, now)
+          )
+          db.commit()
+          db.close()
+          print(f'sprint-complete take 기록됨: {tid}')
+      else:
+          print('brain.db not found — skip')
+
+  - id: write_loop_summary
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    description: "루프 완료 요약 + KPI_PASS 감지 + 다음 스프린트 그랜드 리스트 생성"
+    command: |
+      import os, sqlite3, uuid
+      from pathlib import Path
+      from datetime import datetime, timezone
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'document_release'
+      ws.mkdir(parents=True, exist_ok=True)
+      log_txt = (ws / 'release.log').read_text(errors='replace') if (ws / 'release.log').exists() else ''
+      _rpt = ws / 'report.md'
+      output = _rpt.read_text(errors='ignore') if _rpt.exists() else ''
+
+      # BUG-D 수정: KPI_PASS 감지 → 루프 종료 시그널
+      kpi_rpt = nova_home / 'workspace' / 'kpi_evaluate' / 'kpi_report.md'
+      kpi_text = kpi_rpt.read_text(errors='replace') if kpi_rpt.exists() else ''
+      kpi_passed = 'KPI_PASS' in kpi_text
+
+      # output 변수에 내용 담기 (orchestrator가 output_file에 씀)
+      kpi_suffix = ''
+      if kpi_passed:
+          kpi_suffix = chr(10) + chr(10) + '## ROOP 목표 달성 — 루프 종료' + chr(10) + 'KPI_PASS: chain_engine이 nova-autoplan 재진입을 차단합니다.' + chr(10)
+          try:
+              import uuid
+              db2 = sqlite3.connect(str(nova_home/'brain.db'), timeout=5)
+              db2.execute('PRAGMA journal_mode=WAL')
+              eid2 = uuid.uuid4().hex[:16]
+              now2 = datetime.now(timezone.utc).isoformat()
+              db2.execute('INSERT OR IGNORE INTO hermes_events (id,event_type,severity,title,detail,source_agent,is_read,created_at) VALUES (?,?,?,?,?,?,?,?)',(eid2,'ROOP_COMPLETE','info','[ROOP] KPI_PASS -- loop complete',kpi_text[:200],'nova-document-release',0,now2))
+              db2.commit(); db2.close()
+          except Exception:
+              pass
+      else:
+          kpi_suffix = chr(10) + chr(10) + '## KPI_FAIL — 다음 스프린트 재시도' + chr(10) + '(자동: CHAIN_DONE nova-document-release -> nova-autoplan)' + chr(10)
+      output = (
+          '# nova-document-release: Sprint Loop Complete' + chr(10) + chr(10) +
+          'loop_completed_at: ' + datetime.now(timezone.utc).isoformat() + chr(10) +
+          'kpi_result: ' + ('KPI_PASS' if kpi_passed else 'KPI_FAIL') + chr(10) +
+          'release: complete' + chr(10) +
+          'document: published' + chr(10) + chr(10) +
+          '## Release Log' + chr(10) + chr(10) +
+          log_txt[:2000] + kpi_suffix
+      )
+
+
+quality_threshold: 0
+quality_check: false
+max_retries: 1

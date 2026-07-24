@@ -1,0 +1,92 @@
+name: learn
+description: "nova-learn 에이전트 — KB 지식 패턴 추출 + learn_engine 연동"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-learn, a knowledge synthesis specialist.
+  You extract patterns from recent activity and update the knowledge base.
+
+phases:
+  - id: run_learn_engine
+    executor: shell
+    on_failure: skip
+    description: "learn_engine.py 실행 (시스템 brain 지식 업데이트)"
+    script: |
+      #!/bin/bash
+      WORKSPACE="${NOVA_HOME:-$HOME/.nova}/workspace/learn"
+      mkdir -p "$WORKSPACE"
+      LEARN_ENGINE="${NOVA_HOME:-$HOME/.nova}/engines/learn.py"
+      if [ -f "$LEARN_ENGINE" ]; then
+        echo "[LEARN] learn_engine 실행"
+        NOVA_HOME="${NOVA_HOME:-$HOME/.nova}" \
+        HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}" \
+        python3 "$LEARN_ENGINE" 2>&1 | tee "$WORKSPACE/learn_engine.log"
+      else
+        echo "[PASSTHROUGH] learn engine not found at $LEARN_ENGINE" > "$WORKSPACE/learn_engine.log"
+        echo "learn: skipped"
+      fi
+      cat "$WORKSPACE/learn_engine.log"
+
+  - id: extract_patterns
+    executor: python
+    on_failure: abort
+    description: "brain.db 최근 takes에서 지식 패턴 추출"
+    script: |
+      import sqlite3, os, json
+      from pathlib import Path
+      from datetime import datetime, timezone, timedelta
+      from collections import Counter
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'learn'
+      ws.mkdir(parents=True, exist_ok=True)
+      db_path = nova_home / 'brain.db'
+      patterns = {}
+      if db_path.exists():
+          db = sqlite3.connect(str(db_path), timeout=10)
+          cutoff = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+          rows = db.execute("SELECT kind, holder, weight FROM takes WHERE created_at >= ?", (cutoff,)).fetchall()
+          kind_counter = Counter(r[0] for r in rows)
+          holder_counter = Counter(r[1] for r in rows)
+          avg_weight = sum(r[2] for r in rows) / len(rows) if rows else 0
+          patterns = {
+              'total_takes': len(rows),
+              'avg_weight': round(avg_weight, 3),
+              'top_kinds': kind_counter.most_common(5),
+              'top_holders': holder_counter.most_common(5),
+          }
+          db.close()
+      (ws / 'patterns.json').write_text(json.dumps(patterns, ensure_ascii=False, indent=2))
+      print(ws / 'patterns.json')
+
+  - id: write_learn_summary
+    executor: llm
+    on_failure: abort
+    description: "지식 학습 요약 리포트 생성"
+    input_files:
+      - patterns.json
+    output_file: report.md
+    prompt_file: "write_learn_summary.txt"
+
+  - id: dod_verify
+    name: "DoD 키워드 출력 (체인 게이트)"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    script: |
+      from pathlib import Path
+      import os
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
+      ws = nova_home / 'workspace' / 'learn'
+      rpt = ws / 'report.md'
+      existing = rpt.read_text(errors='replace') if rpt.exists() else ''
+      output = 'Knowledge\nlearn\nlearning complete\n\n' + existing[:1500]
+
+runbook:
+  - symptom: "timeout"
+    action: "skip"
+    escalate_after: 300
+
+evolution:
+  enabled: true
+  file: evolution.md

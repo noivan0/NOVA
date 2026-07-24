@@ -1,0 +1,24 @@
+Based on the root cause analysis, propose concrete fixes.
+
+## Shared KB Context
+{{kb_context}}
+
+## Structure your response as:
+
+### Immediate Fix (< 1 hour)
+- Specific code change or configuration adjustment
+- File path and line number if applicable
+- Expected impact
+
+### Short-term Fix (< 1 day)
+- More comprehensive solution
+- Testing approach
+
+### Prevention (long-term)
+- Process or architectural change to prevent recurrence
+- Monitoring/alerting to detect early
+
+### Priority
+PRIORITY: HIGH / MEDIUM / LOW
+
+Be actionable and specific. Include exact commands or code snippets.
