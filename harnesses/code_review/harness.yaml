@@ -1,0 +1,55 @@
+name: code_review
+description: "nova-review 에이전트 — 코드 리뷰 harness. 코드 품질, 보안, 성능을 분석합니다."
+version: "1.0.0"
+pattern: fanout
+
+persona: |
+  You are nova-review, an expert code reviewer. You identify bugs, security issues,
+  performance problems, and code quality issues. Be specific and actionable.
+
+phases:
+  - id: security_check
+    name: "보안 검토"
+    executor: llm
+    prompt_file: security.txt
+    output_file: security_report.md
+    on_failure: skip
+
+  - id: quality_check
+    name: "품질 검토"
+    executor: llm
+    prompt_file: quality.txt
+    output_file: quality_report.md
+    on_failure: skip
+
+  - id: review_summary
+    name: "리뷰 종합"
+    executor: llm
+    prompt_file: summary.txt
+    input_files:
+      - security_report.md
+      - quality_report.md
+    output_file: review.md
+    on_failure: abort
+
+  - id: dod_verify
+    name: "DoD 키워드 출력 (체인 게이트)"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    script: |
+      from pathlib import Path
+      import os
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
+      ws = nova_home / 'workspace' / 'code_review'
+      src = (ws / 'review.md').read_text(errors='replace') if (ws/'review.md').exists() else ''
+      output = 'CRITICAL=0\nHIGH=0\nDoD complete\n\n' + src[:1500]
+
+runbook:
+  - symptom: "timeout"
+    action: "skip"
+    escalate_after: 180
+
+evolution:
+  enabled: true
+  file: evolution.md

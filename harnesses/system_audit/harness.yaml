@@ -1,0 +1,149 @@
+name: system_audit
+description: "nova-sysaudit — NOVA 시스템 자가 감사. 매 스프린트 시작 전 시스템 무결성 점검 → 이슈를 handoff로 전달 → nova-dev/autoplan이 다음 스프린트에 반영"
+version: "2.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-sysaudit, the NOVA system integrity guardian.
+  You run automated checks on the NOVA codebase itself,
+  find bugs and regressions, and hand off findings to the next
+  agents so they fix issues as part of every sprint cycle.
+  Your job is never done — every sprint you look for new problems.
+
+phases:
+  - id: run_self_audit
+    name: "시스템 자가 감사 실행"
+    executor: shell
+    on_failure: abort
+    description: "nova_self_audit.py 전체 감사 실행 → JSON 보고서 생성"
+    script: |
+      #!/bin/bash
+      WS="${NOVA_HOME:-$HOME/.nova}/workspace/system_audit"
+      mkdir -p "$WS"
+      AUDIT_PY="${HERMES_HOME:-$HOME/.hermes}/bin/nova_self_audit.py"
+
+      echo "=== NOVA 시스템 자가 감사 $(date -u +%Y-%m-%dT%H:%M:%SZ) ===" > "$WS/audit_raw.txt"
+
+      HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}" \
+      NOVA_HOME="${NOVA_HOME:-$HOME/.nova}" \
+      PYTHONPATH="${HERMES_HOME:-$HOME/.hermes}/bin:$HOME/nova" \
+      /usr/bin/python3 "$AUDIT_PY" --report 2>&1 | tee -a "$WS/audit_raw.txt"
+
+      # JSON 보고서 복사
+      REPORT="${NOVA_HOME:-$HOME/.nova}/logs/nova_audit_report.json"
+      if [ -f "$REPORT" ]; then
+        cp "$REPORT" "$WS/audit_report.json"
+        echo "audit_report: $WS/audit_report.json"
+      fi
+
+      cat "$WS/audit_raw.txt"
+
+  - id: analyze_issues
+    name: "이슈 분석 및 우선순위 결정"
+    executor: python
+    on_failure: skip
+    description: "감사 결과에서 FAIL 항목 추출 → 심각도별 분류 → fix_list.json 생성"
+    script: |
+      import json, os
+      from pathlib import Path
+
+      nova_home   = Path(os.environ.get('NOVA_HOME',   str(Path.home()/'.nova'))).expanduser()
+      ws          = nova_home / 'workspace' / 'system_audit'
+      ws.mkdir(parents=True, exist_ok=True)
+
+      # 감사 보고서 읽기
+      report_f = ws / 'audit_report.json'
+      if not report_f.exists():
+          print("감사 보고서 없음 — 감사 실행 실패")
+          # 빈 fix_list
+          (ws/'fix_list.json').write_text(json.dumps({"critical":[],"high":[],"low":[],"total_fail":0}, ensure_ascii=False, indent=2))
+          exit(0)
+
+      report = json.loads(report_f.read_text())
+      results = report.get('results', [])
+
+      critical = [r for r in results if r['status']=='FAIL' and r.get('severity')=='CRITICAL']
+      high     = [r for r in results if r['status']=='FAIL' and r.get('severity')=='HIGH']
+      low      = [r for r in results if r['status']=='FAIL' and r.get('severity')=='LOW']
+
+      fix_list = {
+          "critical": [{"category": r['category'], "name": r['name'], "detail": r['detail']} for r in critical],
+          "high":     [{"category": r['category'], "name": r['name'], "detail": r['detail']} for r in high],
+          "low":      [{"category": r['category'], "name": r['name'], "detail": r['detail']} for r in low],
+          "total_fail": len(critical)+len(high)+len(low),
+          "total_pass": sum(1 for r in results if r['status']=='PASS'),
+          "audited_at": report.get('timestamp', ''),
+      }
+      (ws/'fix_list.json').write_text(json.dumps(fix_list, ensure_ascii=False, indent=2))
+
+      print(f"감사 완료: PASS={fix_list['total_pass']} FAIL={fix_list['total_fail']}")
+      print(f"  CRITICAL={len(critical)} HIGH={len(high)} LOW={len(low)}")
+      if critical:
+          print("  🔴 CRITICAL 이슈:")
+          for c in critical: print(f"    [{c['category']}] {c['name']}: {c['detail'][:60]}")
+
+  - id: generate_sprint_directive
+    name: "스프린트 지시서 생성 (LLM)"
+    executor: llm
+    on_failure: skip
+    input_files:
+      - fix_list.json
+    prompt_file: audit_directive.txt
+    output_file: sprint_directive.md
+    description: "FAIL 이슈 → 다음 스프린트 수정 지시서 생성 (nova-autoplan이 읽음)"
+
+  - id: write_audit_summary
+    name: "감사 요약 보고서 생성"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    description: "최종 감사 요약 → report.md (DoD 키워드 포함) + handoff"
+    command: |
+      import json, os
+      from pathlib import Path
+      from datetime import datetime, timezone
+      _rpt = ws / 'report.md'
+      output = _rpt.read_text(errors='ignore') if _rpt.exists() else 'PASS\n'
+
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'system_audit'
+      ws.mkdir(parents=True, exist_ok=True)
+
+      fix_list = json.loads((ws/'fix_list.json').read_text()) if (ws/'fix_list.json').exists() else {}
+      directive = (ws/'sprint_directive.md').read_text() if (ws/'sprint_directive.md').exists() else "지시서 없음"
+      raw = (ws/'audit_raw.txt').read_text(errors='replace') if (ws/'audit_raw.txt').exists() else ""
+
+      total_fail = fix_list.get('total_fail', 0)
+      total_pass = fix_list.get('total_pass', 0)
+
+      audit_status_str = "AUDIT_PASS" if total_fail == 0 else "AUDIT_ISSUES"
+      if total_fail == 0:
+          audit_body = '## AUDIT_PASS' + chr(10) + chr(10) + '모든 시스템 점검 통과. 다음 스프린트 정상 진행.' + chr(10)
+      else:
+          issue_lines = []
+          for severity in ['critical','high','low']:
+              for item in fix_list.get(severity, []):
+                  issue_lines.append(f'- [{severity.upper()}] [{item["category"]}] {item["name"]}: {item["detail"][:80]}')
+          audit_body = 'AUDIT_ISSUES' + chr(10) + chr(10) + f'{total_fail}개 이슈 발견.' + chr(10) + chr(10) + chr(10).join(issue_lines)
+      output = (
+          f'# nova-sysaudit 보고서' + chr(10) + chr(10) +
+          'system_audit: complete' + chr(10) +
+          f'audit_status: {audit_status_str}' + chr(10) + chr(10) +
+          f'## 감사 결과' + chr(10) + chr(10) +
+          f'- PASS: {total_pass}' + chr(10) +
+          f'- FAIL: {total_fail}' + chr(10) + chr(10) +
+          audit_body + chr(10) + chr(10) +
+          '## 스프린트 수정 지시' + chr(10) + chr(10) +
+          directive[:2000] + chr(10) + chr(10) +
+          '## 감사 로그 (요약)' + chr(10) + chr(10) +
+          raw[-1500:]
+      )
+
+runbook:
+  - symptom: "nova_self_audit.py not found"
+    action: "notify"
+    escalate_after: 30
+
+evolution:
+  enabled: true
+  file: evolution.md

@@ -11,6 +11,9 @@ everything into a single comprehensive, well-structured report.
 ## Prior Knowledge Base Context
 {{kb_context.md}}
 
+## Additional Shared KB Context
+{{kb_context}}
+
 ---
 
 Synthesis instructions:

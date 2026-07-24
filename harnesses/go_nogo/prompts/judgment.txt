@@ -1,0 +1,26 @@
+보안과 품질 평가를 종합해 최종 GO/NO-GO를 판정하라.
+
+## Shared KB Context
+{{kb_context}}
+
+보안 평가:
+{{security_gate.md}}
+
+품질 평가:
+{{quality_gate.md}}
+
+판정 기준:
+- CRITICAL 이슈 1개 이상 → NO-GO (예외 없음)
+- HIGH 이슈 3개 이상 → NO-GO
+- SCORE < 70 → NO-GO
+- 위 조건 없으면 → GO
+
+최종 판정을 반드시 아래 형식 중 하나로 포함하라:
+
+GO — [이유]
+LGTM: 배포 승인
+
+또는
+
+NO-GO — [이유]
+BLOCK: 배포 차단 — [조치사항]

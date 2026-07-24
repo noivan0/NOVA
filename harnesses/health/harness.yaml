@@ -1,0 +1,96 @@
+name: health
+description: "nova-health 에이전트 — 서비스 헬스 + brain.db 종합 헬스 모니터링"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-health, a system health monitor. You check both service health
+  and the NOVA brain database health score.
+
+phases:
+  - id: collect_health_data
+    executor: shell
+    on_failure: skip
+    description: "서비스 헬스 + brain.db health 수집"
+    script: |
+      #!/bin/bash
+      WORKSPACE="${NOVA_HOME:-$HOME/.nova}/workspace/health"
+      mkdir -p "$WORKSPACE"
+      OUT="$WORKSPACE/health_data.txt"
+      echo "=== NOVA Health Check ==" > "$OUT"
+      echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT"
+
+      # brain.db health 점수 조회
+      python3 - <<'PYEOF' >> "$OUT" 2>&1
+      import sqlite3, os
+      from pathlib import Path
+      db_path = Path(os.environ.get('NOVA_HOME', str(Path.home() / '.nova'))) / 'brain.db'
+      if db_path.exists():
+          db = sqlite3.connect(str(db_path), timeout=5)
+          row = db.execute('SELECT score_overall,score_coverage,score_depth,total_pages,takes_total FROM brain_health ORDER BY rowid DESC LIMIT 1').fetchone()
+          if row:
+              print(f'brain_health_score: {row[0]}')
+              print(f'score_coverage: {row[1]}')
+              print(f'score_depth: {row[2]}')
+              print(f'total_pages: {row[3]}')
+              print(f'takes_total: {row[4]}')
+          else:
+              print('brain_health: NO_DATA')
+          db.close()
+      else:
+          print('brain.db: NOT_FOUND')
+      PYEOF
+
+      # 서비스 헬스체크 (DEPLOY_HEALTH_URL 환경변수가 있을 때만 실행)
+      if [ -n "${DEPLOY_HEALTH_URL:-}" ]; then
+        STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$DEPLOY_HEALTH_URL" --max-time 15 || echo '000')
+        echo "service_http_status: $STATUS" >> "$OUT"
+      else
+        echo "service_http_status: N/A (DEPLOY_HEALTH_URL not set)" >> "$OUT"
+      fi
+      cat "$OUT"
+
+  - id: analyze_health
+    executor: llm
+    on_failure: abort
+    description: "health 데이터 종합 판단"
+    input_files:
+      - health_data.txt  # workspace 상대경로
+    output_file: health_report.md  # workspace 상대경로 (DoD 체크 보장)
+    prompt_file: "analyze_health.txt"
+
+  - id: write_dod_summary
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    description: "DoD 키워드 (HEALTH_OK / HEALTH_DEGRADED) 보장"
+    command: |
+      import os, re
+      from pathlib import Path
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home() / '.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'health'
+      data = (ws / 'health_data.txt').read_text(errors='replace') if (ws / 'health_data.txt').exists() else ''
+      report_text = (ws / 'health_report.md').read_text(errors='replace') if (ws / 'health_report.md').exists() else ''
+      # brain health score 추출 (없으면 기본값 100 — 정상 간주)
+      score_match = re.search(r'brain_health_score:\s*([\d.]+)', data)
+      score = float(score_match.group(1)) if score_match else 100.0
+      degraded = score < 70 or 'HEALTH_DEGRADED' in report_text.upper() or 'CRITICAL' in report_text.upper()
+      report = ws / 'report.md'
+      with open(report, 'w') as f:
+          f.write('# nova-health DoD Summary\n\n')
+          f.write(f'brain_health_score: {score}\n')
+          if degraded:
+              f.write('**DoD NOTE**: HEALTH_DEGRADED \u2014 다음 루프에서 개선 필요\n\n')
+          else:
+              f.write('**DoD PASS**: HEALTH_OK \u2014 시스템 정상\n\n')
+          f.write('## Health Data\n\n')
+          f.write(data[:2000])
+          f.write('\n\n## Analysis\n\n')
+          f.write(report_text[:2000])
+      print(report)
+      _rpt = workspace / 'report.md'
+      output = _rpt.read_text(errors='ignore') if _rpt.exists() else 'PASS\n'
+
+quality_threshold: 0
+quality_check: false
+max_retries: 1

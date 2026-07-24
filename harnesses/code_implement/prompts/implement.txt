@@ -1,0 +1,16 @@
+Based on the analysis below, implement the required code.
+
+Topic: {{topic}}
+
+## Shared KB Context
+{{kb_context}}
+
+## Analysis
+{{analysis.md}}
+
+Provide:
+1. Complete, working code implementation
+2. Brief explanation of key design decisions
+3. Usage example
+
+Write production-quality code with proper error handling.

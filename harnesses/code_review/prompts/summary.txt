@@ -1,0 +1,17 @@
+Synthesize the following review reports into actionable feedback.
+
+## Shared KB Context
+{{kb_context}}
+
+Topic: {{topic}}
+
+## Security Report
+{{security_report.md}}
+
+## Quality Report
+{{quality_report.md}}
+
+Provide:
+1. Top 3 critical issues to fix immediately
+2. Overall verdict: APPROVE / REQUEST_CHANGES / BLOCK
+3. Specific action items for developer

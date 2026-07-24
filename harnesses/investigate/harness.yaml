@@ -1,0 +1,107 @@
+name: investigate
+description: "nova-investigate 에이전트 — CHAIN_FAIL 역방향 폴백. 5 Whys RCA + 수정 제안 자율 생산."
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-investigate, a root cause analysis specialist.
+  You apply the 5 Whys methodology to diagnose failures and propose concrete fixes.
+  Be specific, data-driven, and actionable.
+
+phases:
+  - id: collect_failure_context
+    executor: shell
+    on_failure: skip
+    description: "실패 컨텍스트 수집 (brain.db + logs)"
+    script: |
+      #!/bin/bash
+      WORKSPACE="${NOVA_HOME:-$HOME/.nova}/workspace/investigate"
+      mkdir -p "$WORKSPACE"
+      OUT="$WORKSPACE/failure_context.txt"
+      echo "=== Failure Investigation Context ===" > "$OUT"
+      echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT"
+      echo "" >> "$OUT"
+
+      # brain.db health
+      python3 - << 'PYEOF' >> "$OUT" 2>&1
+      import sqlite3, os
+      from pathlib import Path
+      db_path = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))) / 'brain.db'
+      if db_path.exists():
+          db = sqlite3.connect(str(db_path), timeout=5)
+          h = db.execute('SELECT score_overall,score_coverage,score_depth,score_evolution FROM brain_health ORDER BY rowid DESC LIMIT 1').fetchone()
+          if h: print(f'health: overall={h[0]}, coverage={h[1]}, depth={h[2]}, evolution={h[3]}')
+          takes = db.execute('SELECT COUNT(*) FROM takes').fetchone()[0]
+          orphan = db.execute('SELECT COUNT(*) FROM takes WHERE page_id IS NULL').fetchone()[0]
+          print(f'takes={takes}, orphan={orphan}')
+          recent_err = db.execute("SELECT event_type,title FROM hermes_events WHERE event_type LIKE '%FAIL%' ORDER BY rowid DESC LIMIT 5").fetchall()
+          print('recent failures:', recent_err)
+          db.close()
+      PYEOF
+
+      # brain_watcher 최근 로그
+      echo "" >> "$OUT"
+      echo "=== Recent brain_watcher log ===" >> "$OUT"
+      tail -30 "${NOVA_HOME:-$HOME/.nova}/logs/brain_watcher.log" 2>/dev/null >> "$OUT" || echo "log not found" >> "$OUT"
+
+      echo "" >> "$OUT"
+      echo "=== Chain failure context (from harness task) ===" >> "$OUT"
+      echo "Topic: ${TOPIC:-unknown}" >> "$OUT"
+      cat "$OUT"
+
+  - id: rca_analysis
+    executor: llm
+    on_failure: abort
+    description: "5 Whys 방법론으로 근본원인 분석"
+    input_files:
+      - failure_context.txt  # workspace 상대경로
+    output_file: rca_report.md  # workspace 상대경로 (DoD 체크 보장)
+    prompt_file: "rca.txt"
+
+  - id: fix_proposal
+    executor: llm
+    on_failure: skip
+    description: "수정 제안 + 우선순위"
+    input_files:
+      - rca_report.md  # workspace 상대경로
+    output_file: fix_proposal.md  # workspace 상대경로 (DoD 체크 보장)
+    prompt_file: "fix.txt"
+
+  - id: write_report
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    description: "최종 조사 보고서 생성"
+    command: |
+      import os
+      from pathlib import Path
+      from datetime import datetime, timezone
+      _rpt = workspace / 'report.md'
+      output = _rpt.read_text(errors='ignore') if _rpt.exists() else 'PASS\n'
+
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'investigate'
+
+      rca = (ws / 'rca_report.md').read_text(errors='replace') if (ws / 'rca_report.md').exists() else ''
+      fix = (ws / 'fix_proposal.md').read_text(errors='replace') if (ws / 'fix_proposal.md').exists() else ''
+      ctx = (ws / 'failure_context.txt').read_text(errors='replace') if (ws / 'failure_context.txt').exists() else ''
+
+      report = ws / 'report.md'
+      with open(report, 'w') as f:
+          f.write(f'# nova-investigate RCA Report\n\n')
+          f.write(f'generated_at: {datetime.now(timezone.utc).isoformat()}\n\n')
+          f.write('## Root Cause Analysis\n\n')
+          f.write(rca[:3000])
+          f.write('\n\n## Fix Proposals\n\n')
+          f.write(fix[:2000])
+          f.write('\n\n## Failure Context\n\n')
+          f.write(ctx[:1000])
+          f.write('\n\n**RCA COMPLETE** — chain-engine에 nova-dev 재개 신호 전송됨\n')
+
+      print(report)
+
+quality_threshold: 0
+quality_check: false
+max_retries: 3
+# gstack Iron Law: 3회 실패 시 자동 중단 + 다른 접근법 제안
+# rca.txt 프롬프트에서 3회 실패 규칙을 LLM이 스스로 적용

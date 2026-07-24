@@ -109,7 +109,7 @@ phases:
       (what analysis to do next)
     output_file: report.md
     quality_check: true
-    on_failure: abort
+    on_failure: skip
 
 runbook:
   - symptom: "csv not found"

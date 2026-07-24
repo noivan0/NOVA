@@ -1,0 +1,86 @@
+name: verification_gate
+description: "nova-verify — 완료 주장 전 신선한 검증 강제 harness. superpowers Iron Law: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION. QA 이전 또는 go_nogo 이전에 삽입."
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-verify, the verification enforcer.
+  Apply the Iron Law: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION.
+  Evidence before assertions, always. No shortcuts.
+
+phases:
+  - id: run_verification
+    name: "신선한 검증 실행"
+    executor: shell
+    on_failure: abort
+    description: "실제 테스트/빌드 실행 — 결과 없이 완료 주장 불가"
+    script: |
+      #!/bin/bash
+      WORKSPACE="${NOVA_HOME:-$HOME/.nova}/workspace/verification_gate"
+      mkdir -p "$WORKSPACE"
+      OUT="$WORKSPACE/verification_result.txt"
+      echo "=== Verification Gate ===" > "$OUT"
+      echo "timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT"
+      echo "" >> "$OUT"
+
+      # 작업 디렉토리 감지
+      WORK_DIR="${NOVA_WORK_DIR:-$(pwd)}"
+      echo "work_dir: $WORK_DIR" >> "$OUT"
+
+      cd "$WORK_DIR" 2>/dev/null || { echo "WORK_DIR not accessible" >> "$OUT"; exit 0; }
+
+      # 테스트 실행 (언어 자동 감지)
+      if [ -f "pytest.ini" ] || [ -f "pyproject.toml" ] || find . -name "test_*.py" -maxdepth 3 | grep -q .; then
+        echo "=== pytest ===" >> "$OUT"
+        python3 -m pytest --tb=short -q . 2>&1 | tail -20 >> "$OUT"
+        echo "EXIT_CODE=$?" >> "$OUT"
+      elif [ -f "package.json" ]; then
+        echo "=== npm test ===" >> "$OUT"
+        npm test 2>&1 | tail -20 >> "$OUT"
+        echo "EXIT_CODE=$?" >> "$OUT"
+      else
+        echo "AUTO_DETECT: no test framework found" >> "$OUT"
+        echo "MANUAL_VERIFY_REQUIRED=true" >> "$OUT"
+      fi
+      cat "$OUT"
+
+  - id: verify_claims
+    name: "완료 주장 검증"
+    executor: llm
+    input_files:
+      - verification_result.txt
+    prompt_file: verify.txt
+    output_file: verify_report.md
+    on_failure: skip
+
+  - id: dod_verify
+    name: "검증 DoD 키워드"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    script: |
+      import re
+      from pathlib import Path
+      ws = workspace  # harness 실행 컨텍스트에서 주입됨
+      rpt = (ws / 'verify_report.md').read_text(errors='replace') if (ws/'verify_report.md').exists() else ''
+      vrf = (ws / 'verification_result.txt').read_text(errors='replace') if (ws/'verification_result.txt').exists() else ''
+
+      # 실제 실행 증거 확인
+      has_timestamp = bool(re.search(r'timestamp:', vrf))
+      has_result = bool(re.search(r'EXIT_CODE|passed|failed|MANUAL_VERIFY', vrf))
+      no_speculation = not bool(re.search(r'should pass|probably|seems to|I\'m confident', rpt, re.IGNORECASE))
+
+      if has_timestamp and has_result and no_speculation:
+          header = "VERIFIED=true\nFRESH_EVIDENCE=confirmed\nVERIFY_DOD=PASS\n\n"
+      else:
+          header = "VERIFIED=false\nFRESH_EVIDENCE=missing\nVERIFY_DOD=FAIL\nREASON: No fresh verification evidence found\n\n"
+      output = header + rpt[:1200]
+
+runbook:
+  - symptom: "no test framework"
+    action: "notify"
+    escalate_after: 30
+
+evolution:
+  enabled: true
+  file: evolution.md

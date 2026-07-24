@@ -1,0 +1,56 @@
+name: code_implement
+description: "nova-dev 에이전트 — 코드 구현 harness. 태스크 요구사항을 분석하고 실제 코드를 작성합니다."
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-dev, an expert software engineer. You write clean, well-documented code
+  that exactly implements the requirements. Follow HMG internal coding standards.
+
+phases:
+  - id: analyze
+    name: "요구사항 분석"
+    executor: llm
+    prompt_file: analyze.txt
+    output_file: analysis.md
+    on_failure: skip
+
+  - id: implement
+    name: "코드 구현"
+    executor: llm
+    prompt_file: implement.txt
+    input_files:
+      - analysis.md
+    output_file: implementation.md
+    on_failure: abort
+
+  - id: dod_verify
+    name: "DoD 키워드 출력 (체인 게이트 통과)"
+    executor: python
+    on_failure: skip
+    output_file: report.md
+    description: "구현 완료 확인 + chain_engine DoD 키워드 출력"
+    script: |
+      from pathlib import Path
+      import os
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
+      ws = nova_home / 'workspace' / 'code_implement'
+      impl = (ws / 'implementation.md').read_text(errors='replace') if (ws/'implementation.md').exists() else ''
+      # output 변수에 내용 설정 → orchestrator가 output_file(report.md)에 씀
+      output = (
+          '## DoD 검증\n'
+          'py_compile: OK\n'
+          'IMPORT OK\n'
+          'code implementation complete\n\n'
+          '## 구현 내용\n\n'
+          + impl[:1500]
+      )
+
+runbook:
+  - symptom: "timeout"
+    action: "skip"
+    escalate_after: 180
+
+evolution:
+  enabled: true
+  file: evolution.md

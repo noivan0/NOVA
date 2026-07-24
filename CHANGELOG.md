@@ -1,4 +1,52 @@
-# NOVA v1.4.0 — Full Autonomous Release
+# NOVA Changelog
+
+---
+
+## v3.0.0 — Agent OS 완전자율화 (2026-07-24)
+
+### Major: NOVA Agent OS Phase 1~5 완성 + 마라톤 100회 완주 실증
+
+**완전자율화 루프 구현 완료**
+- brain_watcher 3레이어 구조 (@reboot 자동기동, inotify + kanban 이벤트 반응)
+- 14단계 체인: autoplan → dev → review → cso → qa → ship → checkpoint → canary+health → evaluator → retro+learn → document → document-release → sysaudit → autoplan 재진입
+- marathon 100회 자율 반복 실증 (takes 1,551 누적, health=100.0)
+
+**버그 픽스 누적 (4차 감사까지)**
+- BUG-CHAIN-FRESH: chain_engine ⑤번 블록 fresh_tasks 재조회 (파견 누락 방지)
+- BUG-DOD-FAIL: code_implement harness dod_verify 키워드 앞부분 배치 필수
+- BUG-HARNESS-SCRIPT: harness.py `script` 필드 폴백 (`ph.get("command", ph.get("script",""))`)
+- BUG-ORCH-2ND-VAR: chain.py ORCH-2ND `ORCHESTRATOR_PY` 대문자 오타 → 소문자 수정
+- BUG-KANBAN-PIPE: done 60개 초과 Broken pipe → archive_stale_tasks 자동 정리
+- BUG-WAL-SPIN: brain_watcher CPU 100% → _DB_FILENAMES + TTL 3초 캐시 + 이벤트 레이트 리밋
+- BUG-WORKSPACE-EXPAND: orchestrator.py workspace `expanduser()` 미적용 수정
+- BUG-SYSAUDIT-REGISTER: nova_orchestrator.py HARNESS_AGENTS nova-sysaudit 등록
+- STUCK-RECOVER: active=1 10분 고착 자동 복구 (`_recover_stuck_loop`)
+- stalled(blocked) 태스크 역방향 점프 분리 (순환 폭발 방지)
+
+**harnesses 21종 완성**
+- canary, code_implement, code_review, document_gen, document_release
+- go_nogo, health, investigate, kpi_evaluate, learn, mms_research, nuuseta_research
+- qa, research(v2.0 실웹검색), retro, security_sign_off, ship
+- summarizer, system_audit, verification_gate
+
+**gstack + superpowers 내재화**
+- nova-validator(verification_gate) 추가 — 완료 주장 전 신선 검증 강제 (Iron Law)
+- nova-cso STRIDE/위협모델 통합 보안감사 트리거 확장
+- nova-investigate 근본원인 5-whys 트리거 확장
+
+**자가감사 (nova_self_audit.py)**
+- 30개 CRITICAL/HIGH 점검 항목 자동화
+- /roop 실행 전 선행 감사 필수 — FAIL 시 차단
+
+---
+
+## v2.0.0 — 완전자율화 첫 구현 (2026-07-10)
+
+Claude Code + Codex 공동감사 + 마라톤 100회 완주
+
+---
+
+## v1.4.0 — Full Autonomous Release
 
 ## What's New
 

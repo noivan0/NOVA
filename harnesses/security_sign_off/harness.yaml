@@ -1,0 +1,85 @@
+name: security_sign_off
+description: "nova-cso — OWASP 10대 보안 위협 평가 + 최종 보안 승인. DoD: OWASP + CRITICAL=0"
+version: "1.0.0"
+pattern: pipeline
+
+persona: |
+  You are nova-cso, Chief Security Officer. Perform rigorous OWASP Top 10 assessment.
+  Never approve if CRITICAL issues exist. Always include OWASP keyword and CRITICAL count.
+
+phases:
+  - id: collect_security_artifacts
+    name: "보안 산출물 수집"
+    executor: shell
+    command: |
+      WS="${NOVA_HOME}/workspace"
+      # SECURITY-004 수정: output_file과 수집 파일을 분리.
+      # 이전 버그: shell stdout("수집: N줄")이 output_file을 덮어써 수집된 보안 산출물이 소실됨.
+      # 수정: 수집 내용을 security_input.txt에 직접 쓰고, stdout은 상태 메시지만 출력.
+      > "${WS}/security_sign_off/security_input.txt"
+      COUNT=0
+      for f in code_review/security_report.md code_review/review.md go_nogo/security_gate.md; do
+        FILE="$WS/$f"
+        if [ -f "$FILE" ]; then
+          echo "=== $f ===" >> "${WS}/security_sign_off/security_input.txt"
+          cat "$FILE" >> "${WS}/security_sign_off/security_input.txt"
+          echo "" >> "${WS}/security_sign_off/security_input.txt"
+          COUNT=$((COUNT + $(wc -l < "$FILE")))
+        fi
+      done
+      TOTAL=$(wc -l < "${WS}/security_sign_off/security_input.txt")
+      echo "수집완료: files_scanned=3 total_lines=${TOTAL}"
+    timeout: 30
+    on_failure: abort
+
+  - id: owasp_sign_off
+    name: "OWASP Top 10 평가 + 최종 승인"
+    executor: llm
+    input_files:
+      - security_input.txt
+    prompt_file: owasp.txt
+    output_file: cso_report.md
+    timeout: 120
+    on_failure: abort
+    # SECURITY-001: provider는 반드시 hmg (HMG 사내 엔드포인트)로 설정해야 함.
+    # provider: anthropic 은 외부 Anthropic API를 직접 호출하므로 사내망에서 실패함.
+    # 수정일: 2026-07-19 / 수정자: nova-dev (t_01323546)
+
+  - id: dod_verify
+    name: "DoD 키워드 검증"
+    executor: python
+    command: |
+      import re
+      from pathlib import Path
+      # SECURITY-003 수정: DoD 미달 시에도 OWASP=checked/CRITICAL=0을 하드코딩하던 버그 수정.
+      # 이전 버그: has_owasp=False 또는 has_critical0=False 이어도 OWASP=checked, CRITICAL=0 출력
+      #           → chain_engine이 DoD 통과로 잘못 판정.
+      # 수정: 실제 검증 결과만 헤더에 기록. DoD 미달 시 CSO_DOD=FAIL 출력.
+      rpt = workspace / "cso_report.md"
+      report = rpt.read_text(errors="ignore") if rpt.exists() else ""
+      has_owasp = bool(re.search(r"OWASP", report))
+      has_critical0 = bool(re.search(r"CRITICAL[=:\s]\s*0", report, re.IGNORECASE))
+      if has_owasp and has_critical0:
+          header = "OWASP=checked\nCRITICAL=0\nCSO_DOD=PASS\n\n"
+      else:
+          # DoD 실패 — 실제 상태를 정직하게 기록 (하드코딩 금지)
+          owasp_status = "checked" if has_owasp else "MISSING"
+          critical_status = "0" if has_critical0 else "FOUND"
+          header = (
+              f"OWASP={owasp_status}\n"
+              f"CRITICAL={critical_status}\n"
+              f"CSO_DOD=FAIL\n"
+              f"REASON: has_owasp={has_owasp} has_critical0={has_critical0}\n\n"
+          )
+      output = header + report[:1400]
+    output_file: report.md
+    on_failure: skip
+
+runbook:
+  - symptom: "security_input.txt not found"
+    action: "notify"
+    escalate_after: 30
+
+evolution:
+  enabled: true
+  file: evolution.md
