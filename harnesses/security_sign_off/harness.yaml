@@ -1,6 +1,8 @@
 name: security_sign_off
 description: "nova-cso — OWASP 10대 보안 위협 평가 + 최종 보안 승인. DoD: OWASP + CRITICAL=0"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

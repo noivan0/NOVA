@@ -1,6 +1,8 @@
 name: document_release
 description: "nova-document-release 에이전트 — 문서 배포 + 스프린트 루프 완결 트리거"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

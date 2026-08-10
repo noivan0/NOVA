@@ -1,6 +1,8 @@
 name: investigate
 description: "nova-investigate 에이전트 — CHAIN_FAIL 역방향 폴백. 5 Whys RCA + 수정 제안 자율 생산."
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

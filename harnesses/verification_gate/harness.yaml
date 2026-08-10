@@ -1,6 +1,8 @@
 name: verification_gate
 description: "nova-verify — 완료 주장 전 신선한 검증 강제 harness. superpowers Iron Law: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION. QA 이전 또는 go_nogo 이전에 삽입."
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

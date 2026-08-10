@@ -1,6 +1,8 @@
 name: summarizer
 description: "Long-form content summarizer — takes any text input and produces layered summaries (TL;DR, key points, deep analysis)."
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

@@ -68,6 +68,20 @@ CREATE TABLE IF NOT EXISTS nova_events (
     created_at  TEXT NOT NULL,
     is_read     INTEGER DEFAULT 0
 );
+
+-- Graph edges (knowledge relationships between pages)
+CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
+    id          TEXT PRIMARY KEY,
+    src_page_id TEXT REFERENCES pages(id),
+    dst_page_id TEXT REFERENCES pages(id),
+    edge_type   TEXT NOT NULL,  -- worked_on/depends_on/fixes/caused_by/referenced_by
+    weight      REAL DEFAULT 0.5,
+    agent       TEXT,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kge_src  ON knowledge_graph_edges(src_page_id);
+CREATE INDEX IF NOT EXISTS idx_kge_dst  ON knowledge_graph_edges(dst_page_id);
+CREATE INDEX IF NOT EXISTS idx_kge_type ON knowledge_graph_edges(edge_type);
 """
 
 # Kanban schema (separate DB, optional integration)

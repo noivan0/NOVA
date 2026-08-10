@@ -1,6 +1,8 @@
 name: nuuseta_research
 description: "누우+세타III 블록라인 프로젝트 심층 리서치"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: sequential
 
 phases:

@@ -406,10 +406,79 @@ class HMGProvider(LLMProvider):
         raise RuntimeError(f"HMG API error (모든 키 소진): {last_exc}") from last_exc
 
 
+# ── HMG Codex Responses API (사내 게이트웨이 전용) ────────────────────────────
+
+class CodexResponsesProvider(LLMProvider):
+    """
+    HMG 사내 API 게이트웨이의 OpenAI Responses API 스키마 전용 provider.
+    base_url 자체가 완전한 엔드포인트(.../openai/responses)이며, 표준 OpenAI SDK의
+    chat.completions.create()가 만드는 base_url+"/chat/completions" 경로는 게이트웨이에
+    존재하지 않아 404가 발생한다. requests로 {"model","input"} POST 직접 호출.
+    응답 스키마: {"output": [{"content": [{"type":"output_text","text":"..."}]}]}
+    """
+
+    _MAX_KEY_RETRIES = 3
+
+    def __init__(self, cfg: LLMConfig):
+        if not cfg.base_url:
+            raise ValueError("CodexResponsesProvider requires base_url")
+        self._cfg = cfg
+        self._url: str = cfg.base_url
+        self.model = cfg.model
+        self.max_tokens = cfg.max_tokens
+        self._rotator = _KeyRotator(cfg.api_key or "")
+
+    def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
+        import requests
+        full_input = f"{system}\n\n{prompt}" if system else prompt
+        payload = {"model": self.model, "input": full_input}
+        last_exc = None
+        for attempt in range(self._MAX_KEY_RETRIES):
+            api_key = self._rotator.current()
+            try:
+                r = requests.post(
+                    self._url,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=timeout,
+                    verify=False,
+                )
+                if r.status_code == 429 and self._rotator.total() > 1:
+                    self._rotator.rotate()
+                    time.sleep(1)
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                # output[] 중 type=="message"인 항목의 content[0].text 추출
+                for item in data.get("output", []):
+                    if item.get("type") == "message":
+                        for c in item.get("content", []):
+                            if c.get("type") == "output_text":
+                                return c.get("text", "")
+                return ""
+            except Exception as e:
+                last_exc = e
+                if attempt < self._MAX_KEY_RETRIES - 1:
+                    time.sleep(2 ** attempt)
+        raise RuntimeError(f"CodexResponsesProvider 호출 실패: {last_exc}") from last_exc
+
+    def chat(self, messages: list, timeout: int = 120) -> str:
+        combined = "\n\n".join(f"[{m.get('role','user')}] {m.get('content','')}" for m in messages)
+        return self.complete(combined, timeout=timeout)
+
+
 def get_llm_provider(cfg: LLMConfig) -> LLMProvider:
     p = cfg.provider.lower()
     if p in ("hmg", "hmg_openai"):
         return HMGProvider(cfg)
+    # codex_responses: HMG 사내 게이트웨이 전용 — base_url 자체가 /responses 엔드포인트이며
+    # OpenAI SDK의 chat.completions.create()(base_url + "/chat/completions")를 쓰면
+    # 404 "No static resource .../responses/chat/completions" 발생. 표준 Responses API
+    # 스키마({"model","input"} POST, 응답 output[0].content[0].text)로 직접 호출해야 함.
+    # (2026-08-10 정밀감사에서 evaluate_kpi_codex phase가 매번 404로 조용히 skip되어
+    #  cross-family judge 합의가 사실상 무력화된 것을 실증 확인 → 근본 수정)
+    if p == "codex" and cfg.base_url and "/responses" in cfg.base_url:
+        return CodexResponsesProvider(cfg)
     if p in ("openai", "custom", "codex"):
         return OpenAIProvider(cfg)
     elif p == "anthropic":

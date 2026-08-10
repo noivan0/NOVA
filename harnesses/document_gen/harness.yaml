@@ -1,6 +1,8 @@
 name: document_gen
 description: "nova-document 에이전트 — API 문서 + 릴리즈 노트 자동 생성"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

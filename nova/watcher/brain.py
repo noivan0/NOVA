@@ -272,7 +272,7 @@ def _run_harness_bg(harness_name: str, log_file: Path | None,
             import sys as _sys
             nova_src    = Path.home() / "nova"
             hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
-            nova_home   = Path(os.environ.get("NOVA_HOME",   str(Path.home() / ".nova")))
+            nova_home   = Path(os.environ.get("NOVA_HOME",   str(Path.home() / ".nova"))).expanduser()
             hermes_bin  = hermes_home / "bin"
             for p in (str(hermes_bin), str(nova_src)):
                 if p not in _sys.path:
@@ -438,6 +438,11 @@ def _react(
     new_takes = brain_now["takes"] - brain_prev.get("takes", brain_now["takes"])
     harness_base = state.get("takes_at_last_harness", brain_now["takes"])
     new_takes_for_harness = brain_now["takes"] - harness_base
+    # BUG-DREAM-RESET 수정 (2026-07-30): dream도 재시작 내성 누적 카운팅
+    # in-memory new_takes는 한 루프(1초)에 100개 불가 → 영구 미트리거
+    # harness와 동일하게 state["takes_at_last_dream"] 기반 delta 사용
+    dream_base = state.get("takes_at_last_dream", brain_now["takes"])
+    new_takes_for_dream = brain_now["takes"] - dream_base
 
     # CRITICAL: health drop
     if brain_now["health"] < R["health_critical"]:
@@ -493,8 +498,9 @@ def _react(
             acted.append("chain_engine")
 
     # Takes reactions (tiered)
-    if new_takes >= R["takes_for_dream"] and _can_act(state, "dream", R["dream_min_s"]):
-        _log(f"  takes +{new_takes} → DreamCycle", log_file)
+    # BUG-DREAM-RESET: new_takes_for_dream (영속화) 사용 — 재시작 내성
+    if new_takes_for_dream >= R["takes_for_dream"] and _can_act(state, "dream", R["dream_min_s"]):
+        _log(f"  takes +{new_takes_for_dream} (persistent) → DreamCycle", log_file)
         if "dream" in engines:
             _run_bg(engines["dream"], "dream_takes", log_file, timeout=700)
             state["last_dream"] = time.time()

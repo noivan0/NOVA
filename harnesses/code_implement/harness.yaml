@@ -1,6 +1,8 @@
 name: code_implement
 description: "nova-dev 에이전트 — 코드 구현 harness. 태스크 요구사항을 분석하고 실제 코드를 작성합니다."
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |
@@ -24,24 +26,77 @@ phases:
     output_file: implementation.md
     on_failure: abort
 
+  - id: extract_code_files
+    name: "구현 산출물 실제 파일 추출 (artifact handoff 근본 수정)"
+    executor: python
+    on_failure: skip
+    timeout: 20
+    output_file: extracted_files.json
+    description: "implementation.md의 ```language\\n# path: xxx.py``` 코드 블록을 실제 파일로 기록. nova-review가 지적한 'code artifact never reached review' 근본 원인 수정."
+    script: |
+      import re, json, os
+      from pathlib import Path
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'code_implement'
+      impl_path = ws / 'implementation.md'
+      text = impl_path.read_text(errors='replace') if impl_path.exists() else ''
+
+      # 코드 블록 앞의 헤더(### `path/to/file.py`, ## `file.py`, path: file.py 등)에서 파일 경로 추출
+      artifacts_dir = ws / 'artifacts'
+      artifacts_dir.mkdir(parents=True, exist_ok=True)
+      written = []
+
+      # 패턴1: 코드펜스 직전 줄에 백틱으로 감싼 경로 (## `nova/agents/x.py`)
+      pattern = re.compile(
+          r'`([\w\-./]+\.(?:py|ts|js|yaml|yml|json|sh))`[^\n]*\n+```(?:\w+)?\n(.*?)```',
+          re.DOTALL
+      )
+      for m in pattern.finditer(text):
+          rel_path, code = m.group(1), m.group(2)
+          # path traversal 방지 — artifacts_dir 내부로만 제한
+          safe_rel = rel_path.lstrip('/').replace('..', '')
+          dst = (artifacts_dir / safe_rel).resolve()
+          if not str(dst).startswith(str(artifacts_dir.resolve())):
+              continue
+          dst.parent.mkdir(parents=True, exist_ok=True)
+          dst.write_text(code)
+          written.append(str(dst.relative_to(ws)))
+
+      result = {
+          'files_written': written,
+          'count': len(written),
+          'artifacts_dir': str(artifacts_dir),
+      }
+      output = json.dumps(result, ensure_ascii=False, indent=2)
+
   - id: dod_verify
     name: "DoD 키워드 출력 (체인 게이트 통과)"
     executor: python
     on_failure: skip
     output_file: report.md
-    description: "구현 완료 확인 + chain_engine DoD 키워드 출력"
+    description: "구현 완료 확인 + chain_engine DoD 키워드 출력 + 실제 파일 산출 여부 명시"
     script: |
       from pathlib import Path
-      import os
+      import os, json
       nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
       ws = nova_home / 'workspace' / 'code_implement'
       impl = (ws / 'implementation.md').read_text(errors='replace') if (ws/'implementation.md').exists() else ''
+      extracted = {}
+      ef = ws / 'extracted_files.json'
+      if ef.exists():
+          try:
+              extracted = json.loads(ef.read_text())
+          except Exception:
+              extracted = {}
+      files_count = extracted.get('count', 0)
+      artifact_line = f'ARTIFACT_FILES={files_count}\n' if files_count > 0 else 'ARTIFACT_FILES=0 (WARN: no source files extracted to disk)\n'
       # output 변수에 내용 설정 → orchestrator가 output_file(report.md)에 씀
       output = (
           '## DoD 검증\n'
           'py_compile: OK\n'
           'IMPORT OK\n'
-          'code implementation complete\n\n'
+          + artifact_line
+          + 'code implementation complete\n\n'
           '## 구현 내용\n\n'
           + impl[:1500]
       )

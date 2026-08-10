@@ -1,6 +1,8 @@
 name: health
 description: "nova-health 에이전트 — 서비스 헬스 + brain.db 종합 헬스 모니터링"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

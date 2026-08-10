@@ -1,6 +1,8 @@
 name: research
 description: "Multi-angle research harness — 실제 웹검색(DDG) + KB 컨텍스트 결합 후 최종 리포트 합성 v2.0"
 version: "2.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: fanout
 
 persona: |

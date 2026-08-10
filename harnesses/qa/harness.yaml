@@ -1,6 +1,8 @@
 name: qa
 description: "nova-qa 에이전트 — pytest 실행 + LLM 실패 분석. DoD: 'passed' + 'failed: 0' 포함"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

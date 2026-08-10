@@ -15,3 +15,4 @@ build/
 .mypy_cache/
 docs/plans/
 docs/reports/
+harnesses/*/evolution.md

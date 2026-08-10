@@ -33,7 +33,7 @@ SKIP_FILES     = {"index.md","log.md","log-2026.md","SCHEMA.md",
 
 # .confluence.md 확장자: Confluence 연동 전용 미러 파일
 # — nova_brain DB 인덱싱 대상 아님 (원본 KB 파일이 별도 존재, 중복 방지)
-SKIP_SUFFIXES  = {".confluence.md"}
+SKIP_SUFFIXES  = {".confluence.md", ".md.md"}  # .md.md: 이중확장자 dead link 방지 (2026-07-30)
 
 # archive/weekly는 별도 정책으로 제외.
 # kb/skills/ 는 skill_kb_bridge가 생성하는 KB 요약 페이지이므로 인덱싱 대상이다.

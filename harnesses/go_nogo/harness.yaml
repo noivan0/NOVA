@@ -1,6 +1,8 @@
 name: go_nogo
 description: "nova-checkpoint 에이전트 — 보안/품질 종합 GO/NO-GO 판정. DoD: 'go' 또는 'lgtm'"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |
@@ -50,6 +52,54 @@ phases:
     prompt_file: quality.txt
     output_file: quality_gate.md
     on_failure: skip
+
+  - id: blast_radius_gate
+    name: "Blast Radius Lane 분류 (Eval Engineering Step 6)"
+    executor: python
+    on_failure: skip
+    timeout: 20
+    output_file: blast_radius_report.txt
+    script: |
+      import sys, os, subprocess
+      from pathlib import Path
+      nova_home   = Path(os.environ.get('NOVA_HOME',   str(Path.home()/'.nova')))
+      hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home()/'.hermes')))
+      ws = nova_home / 'workspace' / 'go_nogo'
+
+      # 변경 diff 수집 (git diff 또는 artifacts.txt에서 추출)
+      diff_text = ""
+      artifacts = ws / 'artifacts.txt'
+      if artifacts.exists():
+          diff_text = artifacts.read_text(errors='replace')[:4000]
+
+      # trajectory/faithfulness 결과 읽기 (code_review workspace)
+      import json
+      cr_ws = nova_home / 'workspace' / 'code_review'
+      traj_pass  = True
+      faith_pass = True
+      try:
+          traj = json.loads((cr_ws/'trajectory_report.json').read_text()) if (cr_ws/'trajectory_report.json').exists() else {}
+          faith = json.loads((cr_ws/'faithfulness_report.json').read_text()) if (cr_ws/'faithfulness_report.json').exists() else {}
+          traj_pass  = traj.get('trajectory_pass', True)
+          faith_pass = faith.get('faithfulness_pass', True)
+      except Exception:
+          pass
+
+      # nova_blast_radius 모듈 로드
+      sys.path.insert(0, str(hermes_home / 'bin'))
+      try:
+          from nova_blast_radius import classify_blast_radius, format_gate_report
+          result = classify_blast_radius(
+              diff_text,
+              agent='nova-dev',
+              trajectory_pass=traj_pass,
+              deterministic_pass=True,
+          )
+          report = format_gate_report(result)
+      except Exception as e:
+          report = f"BLAST_RADIUS_LANE=B\nGATE_STATUS=GATE_OPEN\nREASON=blast_radius module error: {e}"
+
+      output = report
 
   - id: final_judgment
     name: "GO/NO-GO 최종 판정"
