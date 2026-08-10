@@ -1,6 +1,8 @@
 name: learn
 description: "nova-learn 에이전트 — KB 지식 패턴 추출 + learn_engine 연동"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

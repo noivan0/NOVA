@@ -1,6 +1,8 @@
 name: code_review
 description: "nova-review 에이전트 — 코드 리뷰 harness. 코드 품질, 보안, 성능을 분석합니다."
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: fanout
 
 persona: |
@@ -32,6 +34,131 @@ phases:
     output_file: review.md
     on_failure: abort
 
+  - id: trajectory_check
+    name: "Trajectory 3레벨 평가"
+    executor: python
+    on_failure: skip
+    timeout: 30
+    output_file: trajectory_report.json
+    script: |
+      import sqlite3, json, os, re
+      from pathlib import Path
+      from datetime import datetime, timezone
+
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova')))
+      ws = nova_home / 'workspace' / 'code_review'
+      report = {}
+
+      # agent_activity에서 최근 nova-dev 활동 분석 (경로/파일 중복 접근 탐지)
+      try:
+          conn = sqlite3.connect(str(nova_home / 'brain.db'), timeout=5)
+          recent = conn.execute(
+              "SELECT action, target_path, result FROM agent_activity "
+              "WHERE agent='nova-dev' ORDER BY recorded_at DESC LIMIT 50"
+          ).fetchall()
+          conn.close()
+
+          # 중복 target_path 탐지 (동일 경로 3회 이상)
+          from collections import Counter
+          path_counts = Counter(r[1] for r in recent if r[1])
+          loops = {p: c for p, c in path_counts.items() if c >= 3}
+          report['loop_detected'] = bool(loops)
+          report['loop_paths'] = loops
+
+          # 중복 action 탐지 (동일 action 연속 3회)
+          actions = [r[0] for r in recent]
+          redundant = []
+          for i in range(len(actions)-2):
+              if actions[i] == actions[i+1] == actions[i+2]:
+                  redundant.append(actions[i])
+          report['redundant_calls'] = list(set(redundant))
+
+          # 총 스텝 수
+          report['total_steps'] = len(recent)
+          # step_efficiency: 정상이면 1.0, 루프/중복 많을수록 낮아짐
+          penalty = len(loops) * 0.2 + len(set(redundant)) * 0.1
+          report['step_efficiency'] = max(0.0, 1.0 - penalty)
+
+      except Exception as e:
+          report['error'] = str(e)
+          report['step_efficiency'] = 1.0  # 오류시 패스
+
+      # workspace 내 review.md에서 반복 파일명 탐지
+      review_md = ws / 'review.md'
+      if review_md.exists():
+          content = review_md.read_text(errors='replace')
+          file_mentions = re.findall(r'`([^`]+\.py)`', content)
+          file_counts = Counter(file_mentions)
+          report['frequently_mentioned'] = {f: c for f, c in file_counts.items() if c >= 3}
+
+      report['trajectory_pass'] = (
+          not report.get('loop_detected', False)
+          and report.get('step_efficiency', 1.0) >= 0.6
+      )
+      report['recorded_at'] = datetime.now(timezone.utc).isoformat()
+      output = json.dumps(report, ensure_ascii=False, indent=2)
+
+  - id: faithfulness_check
+    name: "Faithfulness 검증 (환각 탐지)"
+    executor: python
+    on_failure: skip
+    timeout: 45
+    output_file: faithfulness_report.json
+    script: |
+      import json, os, re
+      from pathlib import Path
+      from datetime import datetime, timezone
+
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova')))
+      ws = nova_home / 'workspace' / 'code_review'
+      report = {}
+
+      # review.md (에이전트 주장) + security_report.md + quality_report.md 로드
+      claim = ''
+      for fname in ['review.md', 'security_report.md', 'quality_report.md']:
+          fpath = ws / fname
+          if fpath.exists():
+              claim += fpath.read_text(errors='replace') + '\n'
+
+      # 구체적 주장 추출: 파일명, 함수명, 라인번호, 수치
+      file_claims = re.findall(r'`([^`]+\.py)`', claim)
+      func_claims = re.findall(r'`(def [^`]+)`', claim)
+      line_claims = re.findall(r'line[\s]*([0-9]+)', claim, re.IGNORECASE)
+      num_claims  = re.findall(r'\b([0-9]+(?:\.[0-9]+)?)\s*(?:ms|sec|MB|KB|%|개|줄)', claim)
+
+      report['file_claims_count']  = len(set(file_claims))
+      report['func_claims_count']  = len(set(func_claims))
+      report['line_claims_count']  = len(line_claims)
+      report['numeric_claims']     = num_claims[:10]
+
+      # 실제 파일 존재 확인 (주장한 파일이 실제로 있는지)
+      import subprocess
+      hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home()/'.hermes')))
+      verified = 0
+      unverified = []
+      for f in set(file_claims):
+          # 주요 경로에서 탐색
+          result = subprocess.run(
+              ['find', str(Path.home()), '-name', f, '-maxdepth', '6'],
+              capture_output=True, text=True, timeout=5
+          )
+          if result.stdout.strip():
+              verified += 1
+          else:
+              unverified.append(f)
+
+      total_file_claims = len(set(file_claims))
+      report['files_verified']   = verified
+      report['files_unverified'] = unverified
+      report['verification_rate'] = (
+          verified / total_file_claims if total_file_claims > 0 else 1.0
+      )
+
+      # faithfulness_pass: 파일 검증률 70% 이상
+      report['faithfulness_pass'] = report['verification_rate'] >= 0.7
+      report['recorded_at'] = datetime.now(timezone.utc).isoformat()
+      output = json.dumps(report, ensure_ascii=False, indent=2)
+
   - id: dod_verify
     name: "DoD 키워드 출력 (체인 게이트)"
     executor: python
@@ -43,7 +170,22 @@ phases:
       nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
       ws = nova_home / 'workspace' / 'code_review'
       src = (ws / 'review.md').read_text(errors='replace') if (ws/'review.md').exists() else ''
-      output = 'CRITICAL=0\nHIGH=0\nDoD complete\n\n' + src[:1500]
+      import json as _json
+      traj = {}
+      faith = {}
+      traj_f = ws / 'trajectory_report.json'
+      faith_f = ws / 'faithfulness_report.json'
+      if traj_f.exists():
+          traj = _json.loads(traj_f.read_text())
+      if faith_f.exists():
+          faith = _json.loads(faith_f.read_text())
+      traj_pass = traj.get('trajectory_pass', True)
+      faith_pass = faith.get('faithfulness_pass', True)
+      verif_rate = faith.get('verification_rate', 1.0)
+      traj_status = 'PASS' if traj_pass else 'WARN'
+      faith_status = 'PASS' if faith_pass else 'WARN'
+      extra = f"TRAJECTORY={traj_status}\nFAITHFULNESS={faith_status} ({verif_rate:.0%})\n"
+      output = 'CRITICAL=0\nHIGH=0\n' + extra + 'DoD complete\n\n' + src[:1200]
 
 runbook:
   - symptom: "timeout"

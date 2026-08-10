@@ -1,6 +1,8 @@
 name: data-pipeline
 description: "CSV data analysis pipeline — load a dataset, profile it, identify insights, and produce a structured report."
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

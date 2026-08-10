@@ -1,6 +1,15 @@
 name: kpi_evaluate
 description: "nova-evaluator — brain_health KPI 평가. DoD: KPI_PASS 또는 KPI_FAIL 출력"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
+panel_judges:
+  - model: "claude-sonnet-4-6"
+    provider: anthropic
+    version: "2026-08-10"
+  - model: "gpt-5.4"
+    provider: codex
+    version: "2026-08-10"
 pattern: pipeline
 
 persona: |
@@ -8,6 +17,56 @@ persona: |
   Always state KPI_PASS or KPI_FAIL clearly in your output.
 
 phases:
+  - id: deterministic_gate
+    name: "Deterministic 선검증 (LLM 없이)"
+    executor: python
+    on_failure: skip
+    timeout: 20
+    output_file: deterministic_check.json
+    command: |
+      import sqlite3, json, os, time
+      from pathlib import Path
+      from datetime import datetime, timezone
+      nova_home = Path(os.environ.get("NOVA_HOME", Path.home() / ".nova"))
+      hermes_home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+      checks = {}
+      # 1. takes +3 증가 확인 (직전 health 대비)
+      try:
+          conn = sqlite3.connect(str(nova_home / "brain.db"), timeout=5)
+          takes_now = conn.execute("SELECT count(*) FROM takes").fetchone()[0]
+          last_takes = conn.execute("SELECT takes_total FROM brain_health ORDER BY rowid DESC LIMIT 1 OFFSET 1").fetchone()
+          prev = last_takes[0] if last_takes else 0
+          checks["takes_growth"] = takes_now - prev >= 3
+          checks["takes_now"] = takes_now
+          conn.close()
+      except Exception as e:
+          checks["takes_growth"] = False
+          checks["takes_error"] = str(e)
+      # 2. brain_watcher pid 파일 존재
+      pid_path = nova_home / "brain_watcher.pid"
+      if pid_path.exists():
+          pid = int(pid_path.read_text().strip())
+          import subprocess
+          r = subprocess.run(["kill", "-0", str(pid)], capture_output=True)
+          checks["brain_watcher_alive"] = r.returncode == 0
+      else:
+          checks["brain_watcher_alive"] = False
+      # 3. KB index.md 오늘 날짜 갱신 확인
+      today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+      idx = hermes_home / "kb" / "index.md"
+      if idx.exists():
+          import time as _t
+          mtime = _t.strftime("%Y-%m-%d", _t.localtime(idx.stat().st_mtime))
+          checks["index_fresh"] = mtime == today
+      else:
+          checks["index_fresh"] = False
+      # 판정: 3개 중 2개 이상 PASS
+      passed = sum(1 for k, v in checks.items() if isinstance(v, bool) and v)
+      total_bool = sum(1 for v in checks.values() if isinstance(v, bool))
+      checks["deterministic_pass"] = passed >= 2
+      checks["judge_model"] = "gpt-5.4"
+      output = json.dumps(checks, ensure_ascii=False, indent=2)
+
   - id: collect_kpi_metrics
     name: "KPI 지표 수집"
     executor: python
@@ -42,15 +101,97 @@ phases:
     on_failure: abort
 
   - id: evaluate_kpi
-    name: "KPI LLM 평가"
+    name: "KPI LLM 평가 (Claude — 1차)"
     executor: llm
     input_files:
       - kpi_raw.json
     prompt_file: evaluate.txt
-    output_file: kpi_report.md
+    output_file: kpi_report_claude.md
     timeout: 60
-    on_failure: abort
+    on_failure: skip
     provider: anthropic
+    judge_model: "claude-sonnet-4-6"
+    judge_version: "2026-08-10"
+
+  - id: evaluate_kpi_codex
+    name: "KPI 패널 Judge (Codex GPT-5.4 — 2차, cross-family)"
+    executor: llm
+    input_files:
+      - kpi_raw.json
+    prompt_file: evaluate.txt
+    output_file: kpi_report_codex.md
+    timeout: 60
+    on_failure: skip
+    provider: codex
+    judge_model: "gpt-5.4"
+    judge_version: "2026-08-10"
+
+  - id: panel_verdict
+    name: "패널 Judge 합의 판정 (3/4 합의 원칙)"
+    executor: python
+    on_failure: skip
+    timeout: 20
+    output_file: kpi_panel_verdict.json
+    script: |
+      import json, re, os
+      from pathlib import Path
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova')))
+      ws = nova_home / 'workspace' / 'kpi_evaluate'
+      votes = []
+      reasons = []
+      for fname, judge in [('kpi_report_claude.md','claude'), ('kpi_report_codex.md','codex')]:
+          fpath = ws / fname
+          if fpath.exists():
+              text = fpath.read_text(errors='replace')
+              if 'KPI_PASS' in text:
+                  votes.append(('PASS', judge))
+              elif 'KPI_FAIL' in text:
+                  votes.append(('FAIL', judge))
+              reasons.append({'judge': judge, 'snippet': text[:200]})
+      pass_votes = sum(1 for v, _ in votes if v == 'PASS')
+      total_votes = len(votes)
+      # 2 judges: 2/2 unanimous = PASS, 1/2 or 0/2 = FAIL
+      # 원문: "3/4 합의" 원칙 적용 — 2 judge 시 만장일치만 PASS
+      panel_pass = (pass_votes == total_votes and total_votes > 0)
+      verdict = {
+          'panel_pass': panel_pass,
+          'pass_votes': pass_votes,
+          'total_votes': total_votes,
+          'votes': [{'verdict': v, 'judge': j} for v, j in votes],
+          'reasons': reasons,
+          'judge_models': ['claude-sonnet-4-6@2026-08-10', 'gpt-5.4@2026-08-10'],
+      }
+      output = json.dumps(verdict, ensure_ascii=False, indent=2)
+
+  - id: failure_regression
+    name: "실패 회귀 테스트 — failure_to_test 결과 점검"
+    executor: python
+    on_failure: skip
+    timeout: 15
+    output_file: failure_regression.json
+    command: |
+      import json, os
+      from pathlib import Path
+      hermes_home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+      test_dir = hermes_home / "tests" / "failures"
+      tests = sorted(test_dir.glob("*.json")) if test_dir.exists() else []
+      recent = tests[-20:] if len(tests) > 20 else tests
+      persistent = []
+      for t in recent:
+          try:
+              d = json.loads(t.read_text())
+              if d.get("worked_or_failed") == "FAILED":
+                  persistent.append(d.get("capability_to_protect", t.name))
+          except Exception:
+              pass
+      result = {
+          "total_failure_tests": len(tests),
+          "checked_recent": len(recent),
+          "persistent_failures": len(persistent),
+          "samples": persistent[:5],
+          "gate": "PASS" if len(persistent) < 5 else "WARN"
+      }
+      output = json.dumps(result, ensure_ascii=False, indent=2)
 
   - id: dod_verify
     name: "DoD 키워드 출력 (체인 게이트)"
@@ -58,12 +199,29 @@ phases:
     on_failure: skip
     output_file: report.md
     script: |
+      import json as _j, os
       from pathlib import Path
-      import os
-      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser().expanduser()
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
       ws = nova_home / 'workspace' / 'kpi_evaluate'
-      src = (ws / 'kpi_report.md').read_text(errors='replace') if (ws/'kpi_report.md').exists() else ''
-      output = 'KPI_PASS\nKPI_FAIL\nDoD complete\n\n' + src[:1500]
+      # 패널 판정 로드
+      verdict = {}
+      vf = ws / 'kpi_panel_verdict.json'
+      if vf.exists():
+          verdict = _j.loads(vf.read_text(errors='replace'))
+      panel_pass = verdict.get('panel_pass', False)
+      pass_v = verdict.get('pass_votes', 0)
+      total_v = verdict.get('total_votes', 0)
+      # fallback: kpi_report_claude.md
+      src = ''
+      for fn in ['kpi_report_claude.md', 'kpi_report_codex.md']:
+          fp = ws / fn
+          if fp.exists():
+              src += fp.read_text(errors='replace')[:600] + '\n'
+      kw = 'KPI_PASS' if panel_pass else 'KPI_FAIL'
+      output = (kw + '\n'
+          + f'PANEL_VERDICT={kw} ({pass_v}/{total_v} judges agree)\n'
+          + f'JUDGES=claude-sonnet-4-6@2026-08-10,gpt-5.4@2026-08-10\n'
+          + 'DoD complete\n\n' + src[:1200])
 
 runbook:
   - symptom: "brain.db"

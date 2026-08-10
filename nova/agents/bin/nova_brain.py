@@ -755,12 +755,18 @@ class NovaBrain:
         """).fetchone()[0]
 
         # 점수 계산
-        score_coverage = min(100.0, pages_with_takes / max(total_pages, 1) * 200)
+        # 점수 계산
+        # BUG-SCORE-SATURATION 수정 (2026-07-30):
+        #   coverage x200 → x100: 100% 커버리지에서 100점 (이전엔 50%에서 포화)
+        #   depth 기준 900→3000자: 현재 avg_chars=1890, 3000자 기준으로 포화 방지
+        score_coverage = min(100.0, pages_with_takes / max(total_pages, 1) * 100)
         score_consistency = max(0.0, 100.0 - weighted_contradictions * 1.0)  # 가중치 기반
         score_freshness = max(0.0, 100.0 - stale_pages / max(total_pages, 1) * 100)
+        # BUG-DEPTH-MINI (2026-07-31): <300자 미니청크(agents/ synth 요약본)가 avg 낮춤
+        # 제외 후 avg: ~2558자 (목표 3000의 85%) → depth score +8~10pt 예상
         score_depth = min(100.0, (self.conn.execute(
-            "SELECT AVG(char_count) FROM page_chunks"
-        ).fetchone()[0] or 0) / 9)  # 900자 기준: AVG=900 → score=100 (현실적 기준 재설정, 한국어 KB 평균 반영)
+            "SELECT AVG(char_count) FROM page_chunks WHERE char_count >= 300"
+        ).fetchone()[0] or 0) / 30)  # 3000자 기준, 미니청크 제외
 
         score_overall = (score_coverage * 0.25 + score_consistency * 0.35 +
                         score_freshness * 0.25 + score_depth * 0.15)

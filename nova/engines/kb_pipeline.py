@@ -6,7 +6,7 @@ import sys, sqlite3, hashlib
 from pathlib import Path
 
 BRAIN = Path("/home/user/.nova/brain.db")
-KB    = Path("/mnt/d/hermes/.hermes/kb")
+KB    = Path("/home/user/.hermes/kb")
 
 
 def _page_id(path_str: str) -> str:
@@ -29,7 +29,7 @@ def _upsert(c: sqlite3.Connection, rel_path: str, title: str, content: str, size
 
 
 def run(changed_path: str | None = None) -> None:
-    with sqlite3.connect(str(BRAIN)) as c:
+    with sqlite3.connect(str(BRAIN), timeout=15) as c:
         schema = [d[1] for d in c.execute("PRAGMA table_info(pages)").fetchall()]
         if "path" not in schema or "title" not in schema:
             print("schema 불일치 — skip")

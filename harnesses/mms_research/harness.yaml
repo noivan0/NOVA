@@ -1,6 +1,8 @@
 name: mms_research
 description: "HMG [REDACTED_FACILITY] MMS/CNC 세탄3 도메인 심층 리서치"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: sequential
 
 phases:

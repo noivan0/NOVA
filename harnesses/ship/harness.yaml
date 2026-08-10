@@ -1,6 +1,8 @@
 name: ship
 description: "nova-ship 에이전트 — 자동 배포 harness. 스크립트 실행 후 헬스체크."
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

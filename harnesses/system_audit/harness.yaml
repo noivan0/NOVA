@@ -1,6 +1,8 @@
 name: system_audit
 description: "nova-sysaudit — NOVA 시스템 자가 감사. 매 스프린트 시작 전 시스템 무결성 점검 → 이슈를 handoff로 전달 → nova-dev/autoplan이 다음 스프린트에 반영"
 version: "2.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |
@@ -102,8 +104,6 @@ phases:
       import json, os
       from pathlib import Path
       from datetime import datetime, timezone
-      _rpt = ws / 'report.md'
-      output = _rpt.read_text(errors='ignore') if _rpt.exists() else 'PASS\n'
 
       nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
       ws = nova_home / 'workspace' / 'system_audit'

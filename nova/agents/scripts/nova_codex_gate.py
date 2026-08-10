@@ -213,9 +213,10 @@ def _record_ct_tl(project: str, phase: str, think: str, act: str, observe: str):
         ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
         entry = f"[{ts}] [{phase}] Think={think[:80]} | Act={act[:80]} | Observe={observe[:80]}"
         con.execute(
-            "INSERT INTO takes (id,page_id,holder,kind,claim,weight,created_at) "
-            "SELECT lower(hex(randomblob(8))), MIN(id), 'nova-gate', 'fact', ?, 0.9, ? "
+            "INSERT INTO takes (id,page_id,holder,kind,claim,weight,source,created_at) "
+            "SELECT lower(hex(randomblob(8))), MIN(id), 'nova-gate', 'fact', ?, 0.9, 'nova-codex-gate', ? "
             "FROM pages WHERE path LIKE ? LIMIT 1",
+            # BUG-SOURCE-NULL-2 (2026-07-31): source 추가
             (entry, ts, f"%{project}%")
         )
         con.commit()
@@ -233,8 +234,8 @@ def _update_trajectory(project: str, final_score: float):
         con = sqlite3.connect(str(NOVA_BRAIN_DB))
         ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
         con.execute(
-            "INSERT OR IGNORE INTO takes (id,page_id,holder,kind,claim,weight,created_at) "
-            "SELECT lower(hex(randomblob(8))), COALESCE(MIN(id),1), 'nova-trajectory', 'bet', ?, 0.7, ? "
+            "INSERT OR IGNORE INTO takes (id,page_id,holder,kind,claim,weight,source,created_at) "
+            "SELECT lower(hex(randomblob(8))), COALESCE(MIN(id),1), 'nova-trajectory', 'bet', ?, 0.7, 'nova-codex-gate', ? "
             "FROM pages WHERE path LIKE ? LIMIT 1",
             (f"[{ts}] {project} score={final_score:.1f}", ts, f"%{project}%")
         )

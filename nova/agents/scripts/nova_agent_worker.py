@@ -107,7 +107,7 @@ def read_shared_context(topic: str, agent: str = "") -> str:
         spec = _ilu.spec_from_file_location("nova_shared_kb", shared_kb_path)
         mod  = _ilu.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod.read_context(topic, agent=agent, max_chars=3000)
+        return mod.read_context(topic, agent=agent, max_chars=4500)
     except Exception as e:
         # fallback: 기본 KB 읽기
         _log(f"nova_shared_kb 로드 실패, fallback 사용: {e}")
@@ -355,7 +355,7 @@ def run_harness(agent: str, harness_name: str, context: dict) -> bool:
     # KB + MEMORY 컨텍스트를 harness context에 주입
     shared_ctx = read_shared_context(context.get("topic", agent))
     if shared_ctx:
-        context = {**context, "kb_context": shared_ctx[:2000]}
+        context = {**context, "kb_context": shared_ctx[:4000]}
 
     return orch.run(harness, context=context, resume=False)
 
@@ -438,8 +438,8 @@ def main() -> None:
         mod  = _ilu.module_from_spec(spec)
         spec.loader.exec_module(mod)
         mod.write_progress(agent, "DONE" if ok else "FAILED", summary[:200], ok)
-    except Exception:
-        pass
+    except Exception as _ep:
+        _log(f"write_progress 실패: {_ep}")
 
     # 오케스트레이터가 읽는 결과 JSON
     result_json = json.dumps({

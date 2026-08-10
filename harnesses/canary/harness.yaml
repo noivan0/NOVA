@@ -1,6 +1,8 @@
 name: canary
 description: "nova-canary 에이전트 — 점진 배포 이상 감지 harness"
 version: "1.0.0"
+judge_model: "claude-sonnet-4-6"
+judge_version: "2026-08-10"
 pattern: pipeline
 
 persona: |

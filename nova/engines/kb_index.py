@@ -28,11 +28,16 @@ def run(changed_path=None):
             lines = text.lstrip('#').split(chr(10))
             title = (lines[0].strip() or md.stem)[:100]
             h = hashlib.md5(text.encode()).hexdigest()
+            page_id = hashlib.sha256(rel.encode()).hexdigest()[:16]
             con.execute(
-                'INSERT OR IGNORE INTO pages'
-                '  (path,title,page_type,compiled_truth,char_count,content_hash,indexed_at,created_at,updated_at)'
-                '  VALUES (?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM pages WHERE path=?),?),?)'
-            , (rel, title, 'kb', text[:3000], len(text), h, now, rel, now, now))
+                'INSERT INTO pages'
+                '  (id,path,title,page_type,compiled_truth,char_count,content_hash,indexed_at,created_at,updated_at)'
+                '  VALUES (?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM pages WHERE id=?),?),?)'
+                '  ON CONFLICT(id) DO UPDATE SET'
+                '    title=excluded.title, compiled_truth=excluded.compiled_truth,'
+                '    char_count=excluded.char_count, content_hash=excluded.content_hash,'
+                '    indexed_at=excluded.indexed_at, updated_at=excluded.updated_at'
+            , (page_id, rel, title, 'kb', text[:3000], len(text), h, now, page_id, now, now))
             inserted += 1
         con.commit()
     print('[kb_index]', inserted, 'pages indexed')
