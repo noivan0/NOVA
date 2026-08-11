@@ -279,6 +279,8 @@ def reactivate_inactive_agents(inactive: list) -> int:
     """비활성 에이전트에 kanban Reactivation 태스크 자동 생성"""
     if not inactive:
         return 0
+    log("  [REACTIVATE-SKIP] auto reactivation temporarily disabled to prevent runaway kanban retries")
+    return 0
     created = 0
     for agent in inactive:
         try:

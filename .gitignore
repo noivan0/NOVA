@@ -16,3 +16,9 @@ build/
 docs/plans/
 docs/reports/
 harnesses/*/evolution.md
+
+# 운영 서버 로컬 산출물 (오픈소스 배포에 불필요) — 2026-08-11
+brain.db
+kb/projects/
+nova/kernel/domain_routing_hermes.yaml
+nova/kernel/domain_routing_hmg_backup.yaml

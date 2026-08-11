@@ -1,4 +1,3 @@
-import os
 #!/usr/bin/env python3
 """
 NOVA 자율 감사 루프 오케스트레이터
@@ -8,11 +7,12 @@ NOVA 자율 감사 루프 오케스트레이터
 """
 import subprocess, os, json, re
 from datetime import datetime
+from pathlib import Path
 
 HERMES_HOME = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
 # BOARDS: nova_boards.json에서 동적 로드
 import json as _json, pathlib as _pl
-_boards_file = _pl.Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "kanban/nova_boards.json"
+_boards_file = _pl.Path(HERMES_HOME) / "kanban/nova_boards.json"
 BOARDS = _json.load(open(_boards_file))["boards"] if _boards_file.exists() else []
 MAX_TASKS_PER_RUN = 3  # 한 번에 최대 3개 태스크 처리
 

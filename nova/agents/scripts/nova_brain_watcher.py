@@ -1,4 +1,3 @@
-import os
 #!/usr/bin/env python3
 """
 nova_brain_watcher.py v2 — 두뇌 기억 변화 감지 (1초 폴링)
@@ -15,13 +14,11 @@ nova_brain_watcher.py v2 — 두뇌 기억 변화 감지 (1초 폴링)
   health 하락 → 즉시 DreamCycle
   kanban 변화 → 즉시 chain_engine
 """
-import os as _os
-from pathlib import Path as _Path
-_HERMES_HOME = _os.environ.get("HERMES_HOME", str(_Path.home() / ".hermes"))
-
 
 import sqlite3, time, os, json, uuid, datetime, subprocess
 from pathlib import Path
+
+_HERMES_HOME = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
 
 DB          = f"{_HERMES_HOME}/nova_brain.db"
 KANBAN_DB   = f"{_HERMES_HOME}/kanban/boards/rail-saas/kanban.db"
@@ -43,8 +40,13 @@ COLLECTOR_MIN_GAP_S = 7 * 24 * 3600  # 7일 간격 — nova-resource-seo/marketi
 AUDIT_LOOP_SH      = Path(SCRIPTS) / "nova_audit_loop.sh"
 AUDIT_MIN_GAP_S    = 12 * 3600  # STAGNANT/health 이벤트 시 마지막 감사 후 12h 경과해야 실행
 
+# blog_geo_engine — 발행 훅 감지 + 일일 분석
+GEO_ENGINE         = Path(SCRIPTS) / "blog_geo_engine.py"
+GEO_ENGINE_MIN_S   = 300   # BLOG_PUBLISHED 이벤트 연속 발행 시 최소 간격 5분
+GEO_DAILY_MIN_S    = 20 * 3600  # 일일 전체 분석 최소 간격 20h
+
 # nova_wiki_synthesize — crosslink/stale/takes phase 편승
-WIKI_SYNTH    = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "bin/nova_wiki_synthesize.py"
+WIKI_SYNTH    = Path(_HERMES_HOME) / "bin/nova_wiki_synthesize.py"
 WIKI_CROSSLINK_MIN_GAP_S = 6 * 3600    # synthesize 반응 시 편승 (6h 간격)
 WIKI_STALE_MIN_GAP_S     = 24 * 3600   # dream 반응 후 편승 (1일 간격 — 무거운 LLM 재생성)
 WIKI_TAKES_MIN_GAP_S     = 12 * 3600   # takes +100(dream급) 반응 후 편승 (12h 간격)
@@ -133,7 +135,7 @@ def snap_kb():
     wiki/는 제외 — nova_kb_sync가 재인덱싱 시 wiki mtime 변경 → 순환 트리거 방지
     """
     try:
-        hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+        hermes_home = Path(_HERMES_HOME)
         scan_roots = [
             hermes_home / "kb",
             # wiki/는 스캔 제외: kb_sync가 wiki 재인덱싱 시 mtime 변경 → 순환 감지 방지
@@ -660,6 +662,8 @@ def _bootstrap_once(brain_now, kanban_now, state):
         "health": 100.0,
     }
     acted = react(brain_now, prev, kanban_now, kanban_now, state)
+    # 부트스트랩 시 미읽 GEO 이벤트 처리
+    _check_blog_geo_events(state)
     if can_act(state, "stagnant_check", 3600):
         stagnant_list = detect_stagnant_agents()
         state["last_stagnant_check"] = time.time()
@@ -685,8 +689,8 @@ def _watch_target_dirs() -> list[str]:
     nova_brain.db → /root/.hermes 최상위 (non-recursive)
     kanban.db → 각 보드 디렉토리만 (non-recursive)
     """
-    targets = [os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))]   # nova_brain.db 위치 (최상위만, -r 없이도 동작)
-    boards_root = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "kanban/boards"
+    targets = [_HERMES_HOME]   # nova_brain.db 위치 (최상위만, -r 없이도 동작)
+    boards_root = Path(_HERMES_HOME) / "kanban/boards"
     if boards_root.exists():
         for board_dir in boards_root.iterdir():
             if board_dir.is_dir() and (board_dir / "kanban.db").exists():
@@ -710,6 +714,10 @@ def _spawn_db_inotify():
             # _watch_target_dirs()가 정확한 경로만 반환하므로 recursive 불필요
             "-e", "close_write,create,moved_to,delete",
             "--format", "%w|%f|%e",
+            # BUG-INOTIFY-FLOOD 수정 (2026-07-22):
+            # /root/.hermes/ 전체 감시 시 초당 6600+ WAL/SHM 이벤트 → Python 100% CPU 스핀
+            # --include $ 앵커로 .db-wal/.db-shm 제외, 메인 DB 파일만 필터링
+            "--include", r"(nova_brain|kanban)\.db$",
             *_watch_target_dirs(),
         ],
         stdout=subprocess.PIPE,
@@ -721,10 +729,99 @@ def _spawn_db_inotify():
 
 def _relevant_db_event(path: Path) -> bool:
     name = path.name
+    # BUG-WAL-SPIN 수정 (OSS 동기화 2026-07-21):
+    # WAL/SHM 파일은 read-only 연결 시에도 빈번하게 이벤트 발생 → CPU 99% 스핀
+    # 메인 DB 파일만 감시하면 실제 변경을 충분히 감지 가능
     return name in {
-        "nova_brain.db", "nova_brain.db-wal", "nova_brain.db-shm",
-        "kanban.db", "kanban.db-wal", "kanban.db-shm",
+        "nova_brain.db",
+        "kanban.db",
     }
+
+
+def _run_blog_geo_engine(state, event_type="daily", blog=None, url="", title=""):
+    """
+    blog_geo_engine.py 실행.
+    event_type='publish': 발행 직후 훅 (5분 쿨다운)
+    event_type='daily':   일일 전체 분석 (20h 쿨다운)
+    """
+    if not GEO_ENGINE.exists():
+        return
+
+    if event_type == "publish":
+        if not can_act(state, "geo_engine_publish", GEO_ENGINE_MIN_S):
+            return
+        cmd = [
+            "python3", str(GEO_ENGINE),
+            "--event", "publish",
+            "--blog", blog or "",
+            "--url",  url,
+            "--title", title,
+        ]
+        log(f"  [GEO-HOOK] BLOG_PUBLISHED → geo_engine publish ({blog})")
+        state["last_geo_engine_publish"] = time.time()
+    else:
+        if not can_act(state, "geo_engine_daily", GEO_DAILY_MIN_S):
+            return
+        cmd = ["python3", str(GEO_ENGINE)]
+        log(f"  [GEO-DAILY] geo_engine 일일 분석 실행")
+        state["last_geo_engine_daily"] = time.time()
+
+    try:
+        import subprocess as _sp
+        _geo_log = open(f"{_HERMES_HOME}/logs/blog_geo_engine.log", "a")
+        _sp.Popen(cmd, stdout=_geo_log, stderr=_sp.STDOUT)
+    except Exception as e:
+        log(f"  [GEO-ENGINE-ERR] {e}")
+
+
+def _check_blog_geo_events(state):
+    """
+    hermes_events 에서 미읽 BLOG_PUBLISHED / BLOG_GEO_DAILY 이벤트 감지.
+    watcher가 DB 변화를 감지한 직후 호출.
+    """
+    if not Path(DB).exists():
+        return
+    try:
+        import re as _re2
+        db = sqlite3.connect(DB, timeout=2)
+        # 미읽 BLOG_PUBLISHED 이벤트 (최근 10분 이내)
+        cutoff = (datetime.datetime.now(datetime.timezone.utc)
+                  - datetime.timedelta(minutes=10)).isoformat()
+        published = db.execute(
+            "SELECT id, title, detail FROM hermes_events "
+            "WHERE event_type='BLOG_PUBLISHED' AND is_read=0 AND created_at >= ? "
+            "ORDER BY created_at ASC LIMIT 5",
+            (cutoff,)
+        ).fetchall()
+        for eid, title, detail in published:
+            # detail = "url=https://..."
+            url   = ""
+            blog  = ""
+            if detail:
+                m = _re2.search(r"url=(\S+)", detail)
+                if m:
+                    url = m.group(1)
+            m2 = _re2.search(r"\[(\w+)\]", title or "")
+            if m2:
+                blog = m2.group(1)
+            db.execute("UPDATE hermes_events SET is_read=1 WHERE id=?", (eid,))
+            db.commit()
+            _run_blog_geo_engine(state, "publish", blog=blog, url=url, title=title or "")
+
+        # 일일 분석 이벤트 (BLOG_GEO_DAILY 트리거)
+        daily_evt = db.execute(
+            "SELECT id FROM hermes_events "
+            "WHERE event_type='BLOG_GEO_DAILY_TRIGGER' AND is_read=0 "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        if daily_evt:
+            db.execute("UPDATE hermes_events SET is_read=1 WHERE id=?", (daily_evt[0],))
+            db.commit()
+            _run_blog_geo_engine(state, "daily")
+
+        db.close()
+    except Exception as e:
+        log(f"  [GEO-CHECK-ERR] {e}")
 
 
 def _run_stagnant_check(state):
@@ -776,6 +873,12 @@ def main():
         log(f"bootstrap 반응: {boot_acted}")
         save_state(state)
 
+    # BUG-INOTIFY-FLOOD 수정 (2026-07-22):
+    # kanban.db 초당 800+회 쓰기 + WAL/SHM 이벤트 → Python 100% CPU 스핀
+    # 최소 처리 간격(REACT_MIN_INTERVAL) 적용: 이벤트는 드레인하되 snap/react는 throttle
+    REACT_MIN_INTERVAL = 3.0   # 초당 최대 0.33회 DB 스냅샷+반응
+    _last_react_ts: float = 0.0
+
     while True:
         proc = _spawn_db_inotify()
         try:
@@ -801,6 +904,13 @@ def main():
                 if not _relevant_db_event(full):
                     continue
 
+                # 스로틀: 최소 REACT_MIN_INTERVAL 초 경과 후에만 snap/react 실행
+                # pipe는 계속 드레인(위 continue들)하되 처리는 제한 — CPU 과점 방지
+                now_ts = time.time()
+                if now_ts - _last_react_ts < REACT_MIN_INTERVAL:
+                    continue
+                _last_react_ts = now_ts
+
                 brain_now = snap_brain()
                 kanban_now = snap_kanban()
                 if brain_now is None:
@@ -814,6 +924,10 @@ def main():
                 acted = react(brain_now, brain_prev, kanban_now, kanban_prev, state)
                 if brain_changed and (brain_now.get("takes", 0) > brain_prev.get("takes", 0)):
                     _run_stagnant_check(state)
+
+                # GEO 이벤트 감지 (DB 변화 시마다 미읽 이벤트 체크)
+                if brain_changed:
+                    _check_blog_geo_events(state)
 
                 if acted:
                     log(f"event 반응: {acted}")

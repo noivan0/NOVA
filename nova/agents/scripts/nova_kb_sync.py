@@ -108,60 +108,47 @@ def sync_project(name: str) -> str:
     return '\n'.join(lines)
 
 def main():
-    # BUG-KB-1 fix: /tmp/nova_kb_sync.lock 획득 → autonomous_engine의 lock 체크 유효화
-    SYNC_LOCK = "/tmp/nova_kb_sync.lock"
-    lock_fd = open(SYNC_LOCK, "w")
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        lock_fd.close()
-        print("[nova_kb_sync] 이미 실행 중 — SKIP", flush=True)
-        return
-    try:
-        KB_DIR.mkdir(parents=True, exist_ok=True)
-        updated = []
-        PROJECTS = _load_all_projects()  # [M-3 fix] 동적 로드
-        for name in PROJECTS:
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    updated = []
+    PROJECTS = _load_all_projects()  # [M-3 fix] 동적 로드
+    for name in PROJECTS:
+        try:
+            content = sync_project(name)
+            out = KB_DIR / f'{name}-nova.md'
+            # [R20-CX-001-FIX] write_text → mkstemp+replace 원자적 쓰기 (크론 동시 실행 충돌 방지)
+            fd, tmp_path = tempfile.mkstemp(dir=str(KB_DIR), suffix='.md.tmp')
             try:
-                content = sync_project(name)
-                out = KB_DIR / f'{name}-nova.md'
-                # [R20-CX-001-FIX] write_text → mkstemp+replace 원자적 쓰기 (크론 동시 실행 충돌 방지)
-                fd, tmp_path = tempfile.mkstemp(dir=str(KB_DIR), suffix='.md.tmp')
-                try:
-                    with os.fdopen(fd, 'w', encoding='utf-8') as tmp_f:
-                        fd = -1  # fdopen이 소유권 취득 — 이중 close 방지
-                        tmp_f.write(content)
-                    pathlib.Path(tmp_path).replace(out)
-                    tmp_path = None
-                except Exception:
-                    if fd != -1:
-                        try:
-                            os.close(fd)
-                        except OSError:
-                            pass
-                    if tmp_path:
-                        try:
-                            pathlib.Path(tmp_path).unlink(missing_ok=True)
-                        except OSError:
-                            pass
-                    raise
-                updated.append(name)
-                print(f'[OK] {name} → {out}')
-            except Exception as e:
-                print(f'[ERR] {name}: {e}')
-
-        # [R16-CX-003-FIX] KB_LOG append에 fcntl 배타락 적용 (크론 동시 실행 충돌 방지)
-        with open(KB_LOG, 'a', encoding='utf-8') as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                f.write(f"## [{datetime.now().strftime('%Y-%m-%d')}] nova-kb-sync | {', '.join(updated)} 업데이트\n")
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-        print(f'\n[nova_kb_sync] {len(updated)}/{len(PROJECTS)} 프로젝트 KB 동기화 완료')
-    finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        lock_fd.close()
+                with os.fdopen(fd, 'w', encoding='utf-8') as tmp_f:
+                    fd = -1  # fdopen이 소유권 취득 — 이중 close 방지
+                    tmp_f.write(content)
+                pathlib.Path(tmp_path).replace(out)
+                tmp_path = None
+            except Exception:
+                if fd != -1:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                if tmp_path:
+                    try:
+                        pathlib.Path(tmp_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                raise
+            updated.append(name)
+            print(f'[OK] {name} → {out}')
+        except Exception as e:
+            print(f'[ERR] {name}: {e}')
+    
+    # [R16-CX-003-FIX] KB_LOG append에 fcntl 배타락 적용 (크론 동시 실행 충돌 방지)
+    with open(KB_LOG, 'a', encoding='utf-8') as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.write(f"## [{datetime.now().strftime('%Y-%m-%d')}] nova-kb-sync | {', '.join(updated)} 업데이트\n")
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    
+    print(f'\n[nova_kb_sync] {len(updated)}/{len(PROJECTS)} 프로젝트 KB 동기화 완료')
 
 if __name__ == '__main__':
     main()
