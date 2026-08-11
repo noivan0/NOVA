@@ -35,7 +35,7 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Claude API
 CLAUDE_API_URL   = os.environ.get("CLAUDE_API_URL", "https://internal-llm-gateway.example.com/claude-code/v2/v1/messages")
-CLAUDE_API_MODEL = os.environ.get("CLAUDE_API_MODEL", "claude-sonnet-4-6")
+CLAUDE_API_MODEL = os.environ.get("CLAUDE_API_MODEL", "claude-sonnet-5")
 ANTHROPIC_VERSION = os.environ.get("ANTHROPIC_API_VERSION", "2023-06-01")
 SSL_VERIFY = os.environ.get("REQUESTS_CA_BUNDLE", None) or not bool(
     os.environ.get("NOVA_FORCE_SSL_VERIFY", "")

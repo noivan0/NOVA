@@ -152,9 +152,9 @@ STAGE_ORDER = [
 # ============================================================
 CHAIN_DONE = {
     "nova-autoplan":          "nova-dev",
-    "nova-dev":               "nova-review",
-    "nova-review":            "nova-cso",
-    "nova-cso":               "nova-qa",
+    # nova-dev → CHAIN_FORK로 이관 (review+cso 병렬 분기)
+    # nova-review → CHAIN_FORK 이후 JOIN으로 합류 (nova-cso와 병렬)
+    "nova-cso":               "nova-qa",   # JOIN fallback 역할 유지
     "nova-qa":                "nova-ship",
     "nova-ship":              "nova-checkpoint",
     "nova-checkpoint":        "nova-canary",   # 기본 체인 (CHAIN_FORK가 우선 적용)
@@ -188,6 +188,8 @@ CHAIN_DONE = {
 # 이 테이블에 있는 에이전트는 CHAIN_DONE 대신 CHAIN_FORK 사용
 # ============================================================
 CHAIN_FORK: dict[str, list[str]] = {
+    # nova-dev 완료 → review + cso 동시 생성 (병렬 리뷰/보안 검증)
+    "nova-dev":        ["nova-review", "nova-cso"],
     # nova-checkpoint 완료 → canary + health 동시 생성 (병렬 모니터링)
     "nova-checkpoint": ["nova-canary", "nova-health"],
     # nova-evaluator 완료 → retro + learn 병렬 생성
@@ -202,6 +204,8 @@ CHAIN_FORK: dict[str, list[str]] = {
 # 이 목록의 에이전트가 모두 done 상태일 때만 합류 에이전트 생성
 # ============================================================
 CHAIN_JOIN: dict[str, list[str]] = {
+    # review + cso 둘 다 완료 → nova-qa 합류
+    "nova-qa":                ["nova-review", "nova-cso"],
     # canary + health 둘 다 완료 → evaluator 합류
     "nova-evaluator":         ["nova-canary", "nova-health"],
     # retro + document 둘 다 완료 → document-release 합류
@@ -745,9 +749,21 @@ def run_chain(board: str):
                 # child_exists_set으로 1차 방어 (BUG-A2 수정: FORK와 동일 방식)
                 if (task_id, join_ag) in child_exists_set:
                     continue
-                # 이미 join 태스크가 없는 경우에만 생성 (archived 포함)
+                # BUG-JOIN-1 수정 (2026-07-30): "done" 포함 시 이전 라운드 evaluator가
+                # 차단 → ACTIVE_STATUSES만 체크. 이미 done된 이전 라운드는 재진입 허용.
+                # prereqs 중 가장 최신 created_at 이후에 생성된 join_ag task만 중복으로 간주
+                # BUG-JOIN-2 수정 (2026-07-30): prereqs 중 done 없을 때 max() 빈 sequence ValueError
+                # default=0 으로 방어
+                prereq_max_ts = max(
+                    (
+                        (t.get("created_at") or 0) for t in tasks
+                        if t.get("assignee") in prereqs and t.get("status") == "done"
+                    ),
+                    default=0
+                )
                 existing_join = [t for t in tasks if t.get("assignee") == join_ag
-                                 and t.get("status") in ACTIVE_STATUSES | {"done"}]
+                                 and t.get("status") in ACTIVE_STATUSES
+                                 and (t.get("created_at") or 0) >= prereq_max_ts]
                 if not existing_join:
                     join_title = f"[Join→] {'+'.join(prereqs)} → {join_ag}"
                     join_body  = (
@@ -777,10 +793,25 @@ def run_chain(board: str):
         # KPI_PASS 체크는 반드시 nova-autoplan 재진입 직전(nova-sysaudit→autoplan)에 있어야 함
         if agent == "nova-sysaudit" and next_ag == "nova-autoplan":
             _nova_home = Path(os.environ.get("NOVA_HOME", str(Path.home() / ".nova")))
-            # KPI_PASS 감지 → 루프 종료 (nova-autoplan 재생성 차단)
+            # BUG-KPI-STALE 수정 (2026-08-11): kpi_evaluate harness가 panel judge 구조로
+            # 개편되며 evaluate_kpi phase의 output_file이 kpi_report.md → kpi_report_claude.md로
+            # 변경됨. 이후 kpi_report.md는 더 이상 갱신되지 않는데 이 판정 로직만 옛 파일을
+            # 그대로 봐서, 과거(예: 21시간 전)의 stale KPI_PASS가 영구 박제되어 매 체인마다
+            # nova-autoplan 재진입을 잘못 차단하는 회귀가 발생함(자율루프 완전 정지).
+            # 수정: dod_verify가 실제로 쓰는 report.md(항상 최신 판정 반영)를 최우선으로 보고,
+            # 없을 때만 구 kpi_report.md로 폴백.
+            _kpi_report_new = _nova_home / "workspace" / "kpi_evaluate" / "report.md"
             _kpi_rpt = _nova_home / "workspace" / "kpi_evaluate" / "kpi_report.md"
-            if _kpi_rpt.exists() and "KPI_PASS" in _kpi_rpt.read_text(errors="replace"):
-                log(f"  [ROOP COMPLETE] KPI_PASS 감지 — nova-autoplan 재진입 차단, 루프 종료")
+            _kpi_text = ""
+            if _kpi_report_new.exists():
+                _kpi_text = _kpi_report_new.read_text(errors="replace")
+            elif _kpi_rpt.exists():
+                _kpi_text = _kpi_rpt.read_text(errors="replace")
+            # KPI_PASS/KPI_FAIL 둘 다 있으면(구 dod_verify 하드코딩 잔재) 마지막 등장 토큰 기준
+            _last_pass_idx = _kpi_text.rfind("KPI_PASS")
+            _last_fail_idx = _kpi_text.rfind("KPI_FAIL")
+            if _kpi_text and _last_pass_idx > _last_fail_idx:
+                log(f"  [ROOP COMPLETE] KPI_PASS 감지 ({_kpi_report_new.name if _kpi_report_new.exists() else _kpi_rpt.name}) — nova-autoplan 재진입 차단, 루프 종료")
                 continue
             # max_sprints 체크
             _state_f = _nova_home / "logs" / "roop_state.json"
@@ -794,8 +825,9 @@ def run_chain(board: str):
                         continue
                     _st["sprint"] = _sp_n + 1
                     _state_f.write_text(json.dumps(_st, ensure_ascii=False, indent=2))
-                except Exception:
-                    pass
+                except Exception as _e:
+                    import sys as _sys
+                    print(f"[chain_engine] 스프린트 카운터 증가 실패: {_e}", file=_sys.stderr)
 
         # 중복 방지: 현재 진행 중인 에이전트
         if next_ag in all_active_assignees:

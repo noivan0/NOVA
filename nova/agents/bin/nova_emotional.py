@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 #!/usr/bin/env python3
 """
 nova_emotional.py — 페이지 감정 가중치 계산 (GBrain emotional_weight)

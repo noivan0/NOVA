@@ -53,15 +53,15 @@ if _env_file.exists():
 
 # Claude API 설정
 CLAUDE_BASE  = os.environ.get("CLAUDE_BASE_URL", "https://internal-llm-gateway.example.com/claude-code/v2")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 API_KEY      = os.environ.get("HERMES_API_KEY", "")
 
 # GPT-5.4 API 설정 (헤르2 실증: HMG internal-apigw, max_completion_tokens 필수)
 # 헤르2 발견 (2026-05-24): 헤르 HERMES_API_KEY = Claude 전용, GPT 401
 # GPT-5.4 API 설정 (헤르2 실증: HMG internal-apigw, max_completion_tokens 필수)
 # GPT-5.4 API 설정 (헤르2 실증 2026-05-24: 정확한 엔드포인트 + max_completion_tokens 필수)
-GPT_BASE  = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments/gpt-5.4"
-GPT_MODEL = "gpt-5.4"  # deployment 경로에 버전 포함 → model 필드는 짧게
+GPT_BASE  = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/responses"
+GPT_MODEL = "gpt-5.6-terra"
 GPT_KEY   = os.environ.get("GPT_AUDIT_KEY") or os.environ.get("HERMES_API_KEY", "")
 
 NOVA_BRAIN_DB = HERMES_HOME / "nova_brain.db"
@@ -208,8 +208,8 @@ def gpt_audit(project: str, content: str, claude_result: dict) -> dict:
     """Layer 2: GPT-5.4로 독립 감사 (완전히 다른 모델 — 진짜 독립)
 
     헤르2 실증 (2026-05-24):
-    - endpoint: https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments/gpt-5.4/chat/completions
-    - model: gpt-5.4  # MEMORY 기록 엔드포인트와 동일
+    - endpoint: https://internal-api-gateway.example.com/hchat-in/api/v3/openai/responses
+    - model: gpt-5.6-terra
     - max_completion_tokens 필수 (max_tokens 불가 → HTTP 400)
     - 응답 시간: ~0.9s
     """
@@ -239,7 +239,7 @@ Your output (JSON only, no other text):
   "confirmed_by_gpt": ["Claude was RIGHT about this"],
   "overruled_by_gpt": ["Claude was WRONG about this"],
   "final_recommendation": "one sentence",
-  "reviewer": "gpt-5.4"
+  "reviewer": "gpt-5.6-terra"
 }}"""
 
     payload = {
@@ -279,7 +279,7 @@ Your output (JSON only, no other text):
         if "truncated" in str(final_rec).lower() or result.get("verdict") == "ABORT" and "truncated" in str(result).lower():
             logger.warning(f"[L2 GPT-5.4] truncated 응답 감지 → Claude 폴백")
             return _gpt_fallback_claude(project, content, claude_result)
-        result["reviewer"] = "gpt-5.4"
+        result["reviewer"] = "gpt-5.6-terra"
         result["latency"] = latency
         _record_ct_tl(project, "L2-gpt",
                       f"adj={result.get('score_adjustment','?')} verdict={result.get('verdict','?')}",
