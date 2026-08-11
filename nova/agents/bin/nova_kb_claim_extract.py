@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path.home() / ".hermes" / "bin"))
 
 from nova_llm import call_llm
 
-DB = str(Path.home() / ".hermes" / "nova_brain.db")
+DB = str(Path.home() / ".nova" / "brain.db")  # brain_watcher와 동일 DB — 자율 루프 피드백 통일
 MAX_LLM_PER_RUN = 20  # 1회 실행당 LLM 처리 최대 수
 FALLBACK_WEIGHT = 0.74  # LLM 실패 시 fallback weight
 
@@ -24,12 +24,20 @@ def run(dry_run: bool = False):
     candidates = c.execute("""
         SELECT p.id, p.path, p.title, p.compiled_truth
         FROM pages p
-        WHERE p.path LIKE 'kb/%'
+        WHERE (p.path LIKE 'kb/%' OR p.path LIKE 'agents/%'
+               OR p.path LIKE 'projects/%' OR p.path LIKE 'nova_workspace/%'
+               OR p.path LIKE 'wiki/%' OR p.path LIKE 'workspace/%'
+               OR p.path LIKE 'lessons/%' OR p.path LIKE 'config/%'
+               OR p.path LIKE 'fixes/%' OR p.path LIKE 'user/%'
+               OR p.path LIKE 'weekly/%' OR p.path LIKE 'core/%'
+               OR p.path LIKE 'nova_synthesis/%')
         AND NOT EXISTS (SELECT 1 FROM takes t WHERE t.page_id=p.id AND t.superseded_by IS NULL)
-        AND p.updated_at >= ?
+        -- BUG-CLAIM-COVERAGE-2/3/4 (2026-07-31): 모든 하위 경로 전수 포함 → coverage 100% 목표
         ORDER BY (p.compiled_truth IS NOT NULL) DESC, p.updated_at DESC
         LIMIT ?
-    """, (cutoff, MAX_LLM_PER_RUN)).fetchall()
+    """, (MAX_LLM_PER_RUN,)).fetchall()
+    # BUG-CLAIM-COVERAGE (2026-07-31): kb/만 처리 → agents/+projects/+nova_workspace/ 추가
+    # agents/ 66개, projects/ 19개, nova_workspace/ 48개 미연결 → coverage +9.4% 예상
 
     llm_cnt = 0
     fallback_cnt = 0
@@ -56,14 +64,26 @@ def run(dry_run: bool = False):
 
         holder = path.split("/")[2] if path.count("/") >= 2 and path.split("/")[2].startswith("nova-") else "nova-evaluator"
         weight = 0.87 if llm_cnt and claim and len(claim) > 20 else FALLBACK_WEIGHT
+        # BUG-KIND-HARDCODED (2026-07-31): page_type 기반 kind 자동 분류
+        _pt_row = c.execute("SELECT page_type FROM pages WHERE id=?", (page_id,)).fetchone()
+        _pt = (_pt_row[0] if _pt_row else None) or "general"
+        _kind = {"lesson_learned":"lesson","audit":"fact","finding":"insight","evaluation":"insight","pattern":"pattern"}.get(_pt, "fact")
         c.execute(
-            "INSERT INTO takes (page_id,kind,holder,claim,weight,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-            (page_id, "fact", holder, claim, weight, now, now)
+            "INSERT INTO takes (page_id,kind,holder,claim,weight,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            # BUG-SOURCE-NULL (2026-07-31): source 컬럼 추가
+            (page_id, _kind, holder, claim, weight, "claim_extract", now, now)
         )
 
     db.commit()
     remaining = c.execute("""
-        SELECT count(*) FROM pages p WHERE p.path LIKE 'kb/%'
+        SELECT count(*) FROM pages p
+        WHERE (p.path LIKE 'kb/%' OR p.path LIKE 'agents/%'
+               OR p.path LIKE 'projects/%' OR p.path LIKE 'nova_workspace/%'
+               OR p.path LIKE 'wiki/%' OR p.path LIKE 'workspace/%'
+               OR p.path LIKE 'lessons/%' OR p.path LIKE 'config/%'
+               OR p.path LIKE 'fixes/%' OR p.path LIKE 'user/%'
+               OR p.path LIKE 'weekly/%' OR p.path LIKE 'core/%'
+               OR p.path LIKE 'nova_synthesis/%')
         AND NOT EXISTS (SELECT 1 FROM takes t WHERE t.page_id=p.id AND t.superseded_by IS NULL)
     """).fetchone()[0]
     db.close()

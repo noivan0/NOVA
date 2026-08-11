@@ -53,7 +53,7 @@ def _ssl_ctx():
 
 
 def call_llm(prompt: str, max_tokens: int = 500,
-             model: str = "claude-sonnet-4-6") -> str:
+             model: str = "claude-sonnet-5") -> str:
     """단일 메시지 LLM 호출. 오류 시 빈 문자열 반환.
     마크다운 코드블록(```json ... ```) 자동 제거.
     HTTP 5xx 오류(502 포함) 시 최대 2회 retry (간격 3초)."""
@@ -99,7 +99,7 @@ def call_llm(prompt: str, max_tokens: int = 500,
     return ""
 
 
-def get_llm_client(model: str = "claude-sonnet-4-6"):
+def get_llm_client(model: str = "claude-sonnet-5"):
     """레거시 호환: anthropic.Anthropic 클라이언트 반환 (가능한 경우).
     URL 충돌 문제가 있으므로 call_llm() 사용 권장."""
     try:

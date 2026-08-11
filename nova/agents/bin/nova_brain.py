@@ -252,7 +252,7 @@ class NovaBrain:
         conn.enable_load_extension(False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA busy_timeout=10000")  # 10초 (brain_watcher 경쟁 시 대기)
         conn.execute("PRAGMA cache_size=-64000")
         return conn
 
@@ -704,7 +704,7 @@ class NovaBrain:
 
                         self.conn.execute("""
                             INSERT OR IGNORE INTO contradictions
-                            (id, take_a, take_b, status, created_at)
+                            (id, take_a, take_b, resolution, status, severity, created_at)
                             VALUES (?,?,?,?,?,?,?)
                         """, (cid, p1["id"], p2["id"],
                               ct1[:200], ct2[:200], severity, now))
@@ -754,7 +754,6 @@ class NovaBrain:
             WHERE datetime(updated_at) < datetime('now', '-90 days')
         """).fetchone()[0]
 
-        # 점수 계산
         # 점수 계산
         # BUG-SCORE-SATURATION 수정 (2026-07-30):
         #   coverage x200 → x100: 100% 커버리지에서 100점 (이전엔 50%에서 포화)

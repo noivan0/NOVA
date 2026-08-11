@@ -21,7 +21,7 @@ import hashlib
 import argparse
 from pathlib import Path
 
-HERMES_HOME    = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+HERMES_HOME    = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
 KB_ROOT        = HERMES_HOME / "kb"          # 기본 KB (호환성 유지)
 NOVA_BRAIN_PY  = HERMES_HOME / "bin" / "nova_brain.py"
 # 메타/구조 파일 제외 — KB 콘텐츠 아닌 파일들
@@ -37,16 +37,27 @@ SKIP_SUFFIXES  = {".confluence.md", ".md.md"}  # .md.md: 이중확장자 dead li
 
 # archive/weekly는 별도 정책으로 제외.
 # kb/skills/ 는 skill_kb_bridge가 생성하는 KB 요약 페이지이므로 인덱싱 대상이다.
-SKIP_DIRS      = {"archive","weekly","__pycache__"}
+# nova_workspace/ 는 nova-brain-brain-to-kb sync 결과물 (대량 파일) — brain.db 중복 인덱싱 차단
+#   - KB/nova_workspace/ 는 nova_brain_to_kb.py가 생성하는 미러 파일로 의미있는 원본 아님
+#   - 이 폴더를 인덱싱하면 수백~수천 개 rows 폭발 + takes coverage 붕괴 → health 하락
+SKIP_DIRS      = {"archive","weekly","__pycache__","nova_workspace"}
 
 # 다중 스캔 경로 (prefix → page_type 매핑)
-NOVA_HOME_PATH = Path(os.environ.get("NOVA_HOME", str(Path.home() / ".nova")))
+NOVA_HOME_PATH = Path(os.environ.get("NOVA_HOME", str(Path.home() / ".nova"))).expanduser()
 SCAN_ROOTS = [
-    (KB_ROOT,                          "kb/",         None),
-    (NOVA_HOME_PATH / "wiki",          "wiki/",       "wiki"),      # BUG-W5 수정: concept→wiki
-    (HERMES_HOME / "memories",         "memories/",   "memory"),    # BUG-W3: memories 추가
+    (KB_ROOT / "agents",               "agents/",     None),         # agents/<name>/ → agent명 추출
+    (KB_ROOT / "lessons",              "lessons/",    "knowledge"),  # 신규: lessons/ 인덱싱
+    (KB_ROOT / "memory_archive",       "memory_archive/", "knowledge"),  # 신규: memory_archive/
+    (KB_ROOT / "nova",                 "nova/",       "knowledge"),  # 신규: nova/ 문서
+    (KB_ROOT / "projects",             "projects/",   "knowledge"),  # 신규: projects/
+    (KB_ROOT / "audit_loop",           "audit_loop/", "audit"),      # 신규: audit_loop/
+    (KB_ROOT / "core",                 "core/",       "knowledge"),  # NOVA 핵심 원칙
+    (KB_ROOT / "fixes",                "fixes/",      "knowledge"),  # 오류 해결책
+    (KB_ROOT / "config",               "config/",     "knowledge"),  # 설정 정보
+    (KB_ROOT,                          "kb/",         None),         # 나머지 KB (폴백)
+    (HERMES_HOME / "memories",         "memories/",   "memory"),     # BUG-W3: memories 추가
     (HERMES_HOME / "doosi" / "kb",     "doosi/",      "project"),
-    (NOVA_HOME_PATH / "workspace",     "workspace/",  "harness"),  # harness 결과물
+    (NOVA_HOME_PATH / "workspace",     "workspace/",  "harness"),    # harness 결과물
 ]
 
 WORKSPACE_INCLUDE = {"report.md", "summary_report.md", "insights.md", "synthesis.md"}
@@ -320,7 +331,7 @@ if __name__ == "__main__":
                     [sys.executable, str(kb_wiki_bridge), "--sync"],
                     capture_output=True, text=True, timeout=60,
                     env={**os.environ, "HERMES_HOME": str(HERMES_HOME),
-                         "NOVA_HOME": str(NOVA_HOME)}
+                         "NOVA_HOME": str(NOVA_HOME_PATH)}
                 )
                 if r.returncode == 0:
                     print(f"[nova_kb_sync] wiki 자동 갱신 완료")
