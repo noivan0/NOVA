@@ -57,7 +57,7 @@ phases:
           tid = uuid.uuid4().hex[:16]
           db.execute(
               'INSERT INTO takes (id,page_id,kind,holder,claim,weight,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
-              (tid, None, 'event', 'nova-document-release',
+              (tid, None, 'take', 'nova-document-release',
                '[sprint-complete] 릴리스 완료 — 다음 스프린트 시작', 0.9, now, now)
           )
           db.commit()
