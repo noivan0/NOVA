@@ -8,6 +8,12 @@ NOVA runs 24/7 without timers. It watches its own memory (SQLite DB), detects ch
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.4.0-orange)](CHANGELOG.md)
 
+<p align="center">
+  <img src="docs/assets/nova-quickstart-demo.svg" alt="NOVA quickstart: pip install, nova list, nova run --dry-run with zero API keys" width="700"/>
+</p>
+
+<p align="center"><sub>Real terminal recording — <code>pip install -e .</code> → <code>nova list</code> (21 built-in harnesses) → <code>nova run research --dry-run</code> with the free <code>echo</code> provider, zero API keys, zero git clone required after install. Source: <a href="docs/assets/nova-quickstart-demo.cast">docs/assets/nova-quickstart-demo.cast</a> (replay with <a href="https://asciinema.org">asciinema</a>: <code>asciinema play docs/assets/nova-quickstart-demo.cast</code>).</sub></p>
+
 ---
 
 ## What NOVA Does
