@@ -57,18 +57,31 @@ def _get_api_key() -> str:
 
 
 def get_embedding(text: str) -> Optional[list]:
-    """HMG 임베딩 엔드포인트 호출"""
+    """임베딩 엔드포인트 호출.
+
+    URL은 원저자의 사내 게이트웨이를 기본값으로 쓰지 않는다 — 반드시
+    NOVA_EMBEDDING_URL 환경변수로 설정해야 하며, 미설정 시 명확한 에러를
+    출력하고 임베딩을 건너뛴다(호출부는 None을 안전하게 처리함).
+    """
     api_key = _get_api_key()
     if not api_key:
         return None
-    url = "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/openai/deployments/text-embedding-3-large/embeddings"
+    url = os.environ.get("NOVA_EMBEDDING_URL", "")
+    if not url:
+        print("[ERROR] 환경변수 NOVA_EMBEDDING_URL 미설정 — .env 또는 nova.yaml에서 설정 필요 (임베딩 엔드포인트 URL)")
+        return None
     try:
         resp = requests.post(
             url,
             headers={"api-key": api_key, "Content-Type": "application/json"},
             json={"input": text[:8000], "model": "text-embedding-3-large"},
             timeout=30,
-            verify=False
+            # P1 fix (2026-08-18, Codex-audited): unconditional verify=False
+            # disabled TLS verification for every user; opt out explicitly
+            # via NOVA_DISABLE_SSL_VERIFY=1 for a self-signed internal
+            # gateway.
+            verify=os.environ.get("NOVA_DISABLE_SSL_VERIFY", "").strip().lower()
+            not in ("1", "true", "yes", "on")
         )
         resp.raise_for_status()
         return resp.json()["data"][0]["embedding"]

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """nova_llm.py — NOVA LLM 공용 헬퍼 (모든 nova_ 스크립트에서 import)
 
-정상 엔드포인트: https://h-chat-api.autoever.com/claude-code/v2/v1/messages
+엔드포인트는 환경변수 CLAUDE_MESSAGES_URL로 설정한다 — 사설 게이트웨이
+기본값은 없다. 미설정 시 call_llm()/get_llm_client() 호출 시점에 명확한
+에러를 내고 빈 문자열/None을 반환한다.
 anthropic SDK base_url 방식은 SDK 버전에 따라 /v1 중복 추가 문제 있음 → urllib 직접 사용.
 """
 import json
@@ -14,8 +16,8 @@ import yaml
 from pathlib import Path
 
 
-# 정상 확인된 엔드포인트 (2026-06-02)
-CLAUDE_MESSAGES_URL = "https://h-chat-api.autoever.com/claude-code/v2/v1/messages"
+# 엔드포인트는 환경변수로만 설정 (사설 게이트웨이 기본값 없음)
+CLAUDE_MESSAGES_URL = os.environ.get("CLAUDE_MESSAGES_URL", "")
 
 
 def _get_api_key() -> str:
@@ -46,10 +48,18 @@ def _get_api_key() -> str:
 
 
 def _ssl_ctx():
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+    # P1 fix (2026-08-18, Codex-audited): this used to unconditionally
+    # disable both hostname checking and certificate verification for
+    # every user — appropriate only for the original author's internal
+    # network with a self-signed gateway cert. Default to a real
+    # verifying context; opt out explicitly via NOVA_DISABLE_SSL_VERIFY=1
+    # for a self-signed internal endpoint.
+    if os.environ.get("NOVA_DISABLE_SSL_VERIFY", "").strip().lower() in ("1", "true", "yes", "on"):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    return ssl.create_default_context()
 
 
 def call_llm(prompt: str, max_tokens: int = 500,
@@ -59,6 +69,10 @@ def call_llm(prompt: str, max_tokens: int = 500,
     HTTP 5xx 오류(502 포함) 시 최대 2회 retry (간격 3초)."""
     import time
     key = _get_api_key()
+    if not CLAUDE_MESSAGES_URL:
+        import sys
+        print("[nova_llm] 환경변수 CLAUDE_MESSAGES_URL 미설정 — .env 또는 nova.yaml에서 설정 필요", file=sys.stderr)
+        return ""
     payload = json.dumps({
         "model": model,
         "max_tokens": max_tokens,
@@ -101,16 +115,34 @@ def call_llm(prompt: str, max_tokens: int = 500,
 
 def get_llm_client(model: str = "claude-sonnet-5"):
     """레거시 호환: anthropic.Anthropic 클라이언트 반환 (가능한 경우).
-    URL 충돌 문제가 있으므로 call_llm() 사용 권장."""
+    URL 충돌 문제가 있으므로 call_llm() 사용 권장.
+    base_url은 CLAUDE_ANTHROPIC_BASE_URL 환경변수로 설정해야 하며(없으면
+    CLAUDE_MESSAGES_URL에서 '/v1/messages' 접미사를 제거해 재사용),
+    둘 다 없으면 명확한 에러를 raise한다."""
     try:
         import anthropic
         import httpx
         key = _get_api_key()
+        base_url = os.environ.get("CLAUDE_ANTHROPIC_BASE_URL", "")
+        if not base_url and CLAUDE_MESSAGES_URL:
+            base_url = CLAUDE_MESSAGES_URL.removesuffix("/v1/messages")
+        if not base_url:
+            raise RuntimeError(
+                "환경변수 CLAUDE_ANTHROPIC_BASE_URL 또는 CLAUDE_MESSAGES_URL 미설정 "
+                "— .env 또는 nova.yaml에서 설정 필요"
+            )
         return anthropic.Anthropic(
             api_key=key,
-            base_url="https://h-chat-api.autoever.com/claude-code/v2",
+            base_url=base_url,
             http_client=httpx.Client(
-                verify=False,
+                # P1 fix (2026-08-18): unconditional verify=False disabled
+                # TLS certificate verification for every user, appropriate
+                # only for the original author's internal network with a
+                # self-signed gateway cert. Default to real verification;
+                # opt out explicitly via NOVA_DISABLE_SSL_VERIFY=1 for a
+                # self-signed internal endpoint.
+                verify=os.environ.get("NOVA_DISABLE_SSL_VERIFY", "").strip().lower()
+                not in ("1", "true", "yes", "on"),
                 timeout=httpx.Timeout(90.0, connect=10.0)
             )
         )

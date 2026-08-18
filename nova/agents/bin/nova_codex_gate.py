@@ -52,16 +52,14 @@ if _env_file.exists():
             os.environ.setdefault(_k.strip(), _v.strip())
 
 # Claude API 설정
-CLAUDE_BASE  = os.environ.get("CLAUDE_BASE_URL", "https://h-chat-api.autoever.com/claude-code/v2")
+CLAUDE_BASE  = os.environ.get("CLAUDE_BASE_URL", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 API_KEY      = os.environ.get("HERMES_API_KEY", "")
 
-# GPT-5.4 API 설정 (헤르2 실증: HMG internal-apigw, max_completion_tokens 필수)
-# 헤르2 발견 (2026-05-24): 헤르 HERMES_API_KEY = Claude 전용, GPT 401
-# GPT-5.4 API 설정 (헤르2 실증: HMG internal-apigw, max_completion_tokens 필수)
-# GPT-5.4 API 설정 (헤르2 실증 2026-05-24: 정확한 엔드포인트 + max_completion_tokens 필수)
-GPT_BASE  = "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/openai/responses"
-GPT_MODEL = "gpt-5.6-terra"
+# GPT-5.4 API 설정 — 환경변수 필수 (사설 게이트웨이 기본값 없음)
+# GPT_BASE_URL 미설정 시 gpt_audit() 호출 지점에서 명확한 에러로 처리됨.
+GPT_BASE  = os.environ.get("GPT_BASE_URL", "")
+GPT_MODEL = os.environ.get("GPT_MODEL", "gpt-5.6-terra")
 GPT_KEY   = os.environ.get("GPT_AUDIT_KEY") or os.environ.get("HERMES_API_KEY", "")
 
 NOVA_BRAIN_DB = HERMES_HOME / "nova_brain.db"
@@ -143,6 +141,9 @@ def claude_review(project: str, content: str, mode: str = "review") -> dict:
     if not API_KEY:
         return {"status": "error", "reason": "HERMES_API_KEY not set", "reviewer": "claude"}
 
+    if not CLAUDE_BASE:
+        return {"status": "error", "reason": "환경변수 CLAUDE_BASE_URL 미설정 — .env 또는 nova.yaml에서 설정 필요", "reviewer": "claude"}
+
     # gstack ETHOS: "Connect to user outcomes" — 실제 사용자 경험 연결
     project_criteria = _get_project_criteria(project)
     system_prompt = f"""You are Layer-1 reviewer for {project} (Claude — implementer perspective).
@@ -207,16 +208,16 @@ Output JSON only:
 def gpt_audit(project: str, content: str, claude_result: dict) -> dict:
     """Layer 2: GPT-5.4로 독립 감사 (완전히 다른 모델 — 진짜 독립)
 
-    헤르2 실증 (2026-05-24):
-    - endpoint: https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/openai/responses
-    - model: gpt-5.6-terra
-    - max_completion_tokens 필수 (max_tokens 불가 → HTTP 400)
-    - 응답 시간: ~0.9s
+    endpoint/model은 환경변수(GPT_BASE_URL, GPT_MODEL)로 설정한다 —
+    사설 게이트웨이 기본값은 없다. GPT_BASE_URL 미설정 시 에러 처리.
     """
     try:
         import requests as _req
     except ImportError:
         return _gpt_fallback(claude_result, "requests not installed")
+
+    if not GPT_BASE:
+        return _gpt_fallback(claude_result, "환경변수 GPT_BASE_URL 미설정 — .env 또는 nova.yaml에서 설정 필요")
 
     endpoint = f"{GPT_BASE}/chat/completions"
     # gstack 사고법: 독립 감사관 = "비판적 외부 시선"
@@ -258,8 +259,12 @@ Your output (JSON only, no other text):
     t0 = time.time()
     try:
         import ssl
-        # HMG 내부망 cert 문제 회피
-        resp = _req.post(endpoint, json=payload, headers=headers, timeout=30, verify=False)
+        # P1 fix (2026-08-18): unconditional verify=False disabled TLS
+        # verification for every user; opt out explicitly via
+        # NOVA_DISABLE_SSL_VERIFY=1 for a self-signed internal gateway.
+        _ssl_verify = os.environ.get("NOVA_DISABLE_SSL_VERIFY", "").strip().lower() \
+            not in ("1", "true", "yes", "on")
+        resp = _req.post(endpoint, json=payload, headers=headers, timeout=30, verify=_ssl_verify)
         latency = round(time.time() - t0, 1)
 
         if resp.status_code == 401:
@@ -311,6 +316,9 @@ def _gpt_fallback_claude(project: str, content: str, claude_result: dict) -> dic
         import requests as _req
     except ImportError:
         return _gpt_fallback(claude_result, "requests not installed")
+
+    if not CLAUDE_BASE:
+        return _gpt_fallback(claude_result, "환경변수 CLAUDE_BASE_URL 미설정 — .env 또는 nova.yaml에서 설정 필요")
 
     system_prompt = f"""당신은 {project}의 **독립 품질 감사관 (Layer 2)**입니다.
 Claude Layer 1과 독립적으로, 외부 심사위원 관점에서만 평가하세요.

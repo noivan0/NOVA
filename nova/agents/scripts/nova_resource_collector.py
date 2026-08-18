@@ -33,13 +33,23 @@ KB_DIR       = HERMES_DIR / "kb"
 LOGS_DIR     = HERMES_DIR / "logs" / "nova"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Claude API
-CLAUDE_API_URL   = os.environ.get("CLAUDE_API_URL", "https://h-chat-api.autoever.com/claude-code/v2/v1/messages")
+# Claude API — 사설 게이트웨이 기본값 없음, 환경변수 필수
+CLAUDE_API_URL   = os.environ.get("CLAUDE_API_URL", "")
 CLAUDE_API_MODEL = os.environ.get("CLAUDE_API_MODEL", "claude-sonnet-5")
 ANTHROPIC_VERSION = os.environ.get("ANTHROPIC_API_VERSION", "2023-06-01")
-SSL_VERIFY = os.environ.get("REQUESTS_CA_BUNDLE", None) or not bool(
-    os.environ.get("NOVA_FORCE_SSL_VERIFY", "")
-)  # P2-C fix: nova.py와 동일한 로직 (기본 False — 사내망 self-signed cert 환경)
+# P1 fix (2026-08-18, Codex-audited): this used to default SSL_VERIFY to
+# False (verification OFF) unless NOVA_FORCE_SSL_VERIFY was set to any
+# non-empty string — appropriate only for the original author's internal
+# network with a self-signed gateway cert, and inconsistent with the
+# NOVA_DISABLE_SSL_VERIFY=1 explicit opt-out pattern used everywhere else
+# in this codebase (nova/providers/llm.py, nova/agents/bin/nova_llm.py,
+# nova/agents/bin/nova_brain.py, etc). Default to verification ON; opt out
+# explicitly via NOVA_DISABLE_SSL_VERIFY=1 for a self-signed endpoint.
+_ca_bundle = os.environ.get("REQUESTS_CA_BUNDLE", "")
+SSL_VERIFY = _ca_bundle if _ca_bundle else (
+    os.environ.get("NOVA_DISABLE_SSL_VERIFY", "").strip().lower()
+    not in ("1", "true", "yes", "on")
+)
 
 # RC-1 fix: urllib.urlopen SSL 컨텍스트 헬퍼 (urllib은 verify= 파라미터 없음)
 def _ssl_ctx() -> ssl.SSLContext | None:
@@ -747,6 +757,9 @@ def cmd_learn(project: str):
     if not api_key:
         log.error("[learn] HERMES_API_KEY 없음")
         sys.exit(1)
+    if not CLAUDE_API_URL:
+        log.error("[learn] 환경변수 CLAUDE_API_URL 미설정 — .env 또는 nova.yaml에서 설정 필요")
+        sys.exit(1)
 
     targets = list(DOMAIN_QUERIES.keys()) if project == "_all" else [project]
 
@@ -952,6 +965,9 @@ def cmd_cross():
     api_key = _load_api_key()
     if not api_key:
         log.error("[cross] HERMES_API_KEY 없음")
+        sys.exit(1)
+    if not CLAUDE_API_URL:
+        log.error("[cross] 환경변수 CLAUDE_API_URL 미설정 — .env 또는 nova.yaml에서 설정 필요")
         sys.exit(1)
 
     combined = ""

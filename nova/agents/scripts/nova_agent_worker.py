@@ -44,6 +44,15 @@ for _p in (str(Path.home() / "nova"), str(HERMES_HOME / "bin")):
 
 # api_key 주입 — 1순위: .env HERMES_MASTER_APIKEY / 2순위: config.yaml model.api_key
 def _inject_api_key() -> None:
+    """API 키를 발견하면 관련 env var들을 채운다.
+
+    P1 fix (2026-08-18): NOVA_LLM_PROVIDER/BASE_URL/MODEL을 원저자의 사설
+    HMG 게이트웨이로 강제 주입하던 로직을 제거했다. base_url이 사용자
+    환경(NOVA_LLM_BASE_URL 또는 nova.yaml)에 이미 설정된 경우에만 'hmg'
+    provider를 선택하고, 그렇지 않으면 API 키 없이 동작하는 공개 'echo'
+    provider로 안전하게 폴백한다 (nova/watcher/brain.py의
+    _apply_master_key_llm_defaults()와 동일한 원칙).
+    """
     try:
         import yaml as _yaml
         key = ""
@@ -56,9 +65,20 @@ def _inject_api_key() -> None:
         if not key:
             key = _yaml.safe_load((HERMES_HOME / "config.yaml").read_text()).get("model", {}).get("api_key", "")
         if key:
-            os.environ.setdefault("NOVA_LLM_PROVIDER", "hmg")
-            os.environ.setdefault("NOVA_LLM_BASE_URL", "https://h-chat-api.autoever.com/claude-code/v2")
-            os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-5")
+            has_base_url = bool(os.environ.get("NOVA_LLM_BASE_URL"))
+            if not has_base_url:
+                try:
+                    _nova_yaml = NOVA_HOME / "nova.yaml"
+                    if _nova_yaml.exists():
+                        _raw = _yaml.safe_load(_nova_yaml.read_text()) or {}
+                        has_base_url = bool((_raw.get("llm") or {}).get("base_url"))
+                except Exception:
+                    pass
+            if has_base_url:
+                os.environ.setdefault("NOVA_LLM_PROVIDER", "hmg")
+                os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-4-6")
+            else:
+                os.environ.setdefault("NOVA_LLM_PROVIDER", "echo")
             for var in ("NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
                         "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY", "NOVA_CODEX_API_KEY",
                         "NOVA_IMAGE_GEN_API_KEY"):

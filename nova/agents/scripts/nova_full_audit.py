@@ -275,7 +275,7 @@ if nova_yaml_path.exists():
     model     = llm.get("model","")
     chk("LLM설정", f"provider={provider}", provider in ("anthropic", "hmg"),
         "반드시 anthropic")
-    chk("LLM설정", f"base_url", "h-chat-api.autoever.com" in base_url, base_url)
+    chk("LLM설정", f"base_url", bool(base_url), base_url or "base_url 미설정")
     chk("LLM설정", f"model={model}", "claude" in model.lower(), model)
     chk("LLM설정", "api_key env 주입", True,
         "NOVA_LLM_API_KEY / config.yaml에서 nova_bridge가 주입")

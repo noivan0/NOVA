@@ -19,9 +19,14 @@ STAMP_FILE  = Path(NOVA_HOME) / "logs" / "kb_last_sync.stamp"
 ENV = {**os.environ,
        "NOVA_HOME":        NOVA_HOME,
        "HERMES_HOME":      HERMES_HOME,
-       "NOVA_LLM_PROVIDER":os.environ.get("NOVA_LLM_PROVIDER", "hmg"),
-       "NOVA_LLM_BASE_URL":os.environ.get("NOVA_LLM_BASE_URL", "https://h-chat-api.autoever.com/claude-code/v2"),
+       "NOVA_LLM_PROVIDER":os.environ.get("NOVA_LLM_PROVIDER", "echo"),
+       "NOVA_LLM_BASE_URL":os.environ.get("NOVA_LLM_BASE_URL", ""),
        "NOVA_LLM_MODEL":   os.environ.get("NOVA_LLM_MODEL", "claude-sonnet-5")}
+
+if ENV["NOVA_LLM_PROVIDER"] not in ("echo", "") and not ENV["NOVA_LLM_BASE_URL"]:
+    print("[ERROR] 환경변수 NOVA_LLM_BASE_URL 미설정 — .env 또는 nova.yaml에서 설정 필요 "
+          f"(NOVA_LLM_PROVIDER={ENV['NOVA_LLM_PROVIDER']})")
+    sys.exit(1)
 
 def kb_fingerprint():
     """KB 디렉토리의 파일 mtime 합산으로 변경 감지"""

@@ -53,7 +53,7 @@ if _env_file.exists():
             os.environ.setdefault(_k, _v)
 
 # Claude API 설정
-CLAUDE_BASE = os.environ.get("CLAUDE_BASE_URL", "https://h-chat-api.autoever.com/claude-code/v2")
+CLAUDE_BASE = os.environ.get("CLAUDE_BASE_URL", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 ANTHROPIC_VERSION = os.environ.get("ANTHROPIC_API_VERSION", "2023-06-01")
 API_KEY = os.environ.get("HERMES_API_KEY", "")
@@ -62,8 +62,8 @@ API_KEY = os.environ.get("HERMES_API_KEY", "")
 # [v2.0 업그레이드] GPT-5.4 L2 독립 감사 설정 (2026-05-25)
 # bin/nova_codex_gate.py v2.0에서 병합
 # ─────────────────────────────────────────────────────────
-GPT_BASE  = "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/openai/deployments/gpt-5.4"
-GPT_MODEL = "gpt-5.4"
+GPT_BASE  = os.environ.get("GPT_BASE_URL", "")
+GPT_MODEL = os.environ.get("GPT_MODEL", "gpt-5.4")
 GPT_KEY   = os.environ.get("GPT_AUDIT_KEY") or os.environ.get("HERMES_API_KEY", "")
 NOVA_BRAIN_DB = HERMES_HOME / "nova_brain.db"
 
@@ -269,6 +269,9 @@ def gpt_audit(project: str, content: str, claude_result: dict) -> dict:
     if not GPT_KEY:
         return _gpt_fallback(claude_result, "GPT_KEY not set")
 
+    if not GPT_BASE:
+        return _gpt_fallback(claude_result, "환경변수 GPT_BASE_URL 미설정 — .env 또는 nova.yaml에서 설정 필요")
+
     endpoint = f"{GPT_BASE}/chat/completions"
     criteria = _get_project_criteria(project)
 
@@ -301,8 +304,13 @@ Output JSON only:
     headers = {"Content-Type": "application/json", "api-key": GPT_KEY}
 
     try:
-        ssl_verify = not bool(os.environ.get("NOVA_DISABLE_SSL_VERIFY", ""))
-        resp = requests.post(endpoint, json=payload, headers=headers, timeout=60, verify=ssl_verify)
+        # P1 fix (2026-08-18, Codex-audited full-tree sweep): this local
+        # `not bool(...)` predicate treated ANY non-empty string
+        # (including "0", "false", "no", "off") as "disable verification",
+        # unlike the correct module-level SSL_VERIFY allowlist above
+        # (line 74-76). Reuse that single source of truth instead of a
+        # second, inconsistent policy implementation.
+        resp = requests.post(endpoint, json=payload, headers=headers, timeout=60, verify=SSL_VERIFY)
         if resp.status_code == 200:
             raw = resp.json()["choices"][0]["message"]["content"].strip()
             parsed = _extract_json_from_text(raw)
@@ -352,6 +360,9 @@ def claude_review(project: str, content: str, mode: str = "review") -> dict:
 
     if not API_KEY:
         return _review_error("claude-code", "HERMES_API_KEY not set")
+
+    if not CLAUDE_BASE:
+        return _review_error("claude-code", "환경변수 CLAUDE_BASE_URL 미설정 — .env 또는 nova.yaml에서 설정 필요")
 
     _criteria = _get_project_criteria(project)
     system_prompt = f"""당신은 {project} 프로젝트의 품질 게이트 리뷰어입니다.
@@ -458,6 +469,9 @@ def codex_audit(project: str, content: str, claude_result: dict) -> dict:
                     break
     if not api_key:
         return _review_error("codex-fallback", "HERMES_API_KEY not set", verdict="REQUEST_CHANGES", status="error")
+
+    if not CLAUDE_BASE:
+        return _review_error("codex-fallback", "환경변수 CLAUDE_BASE_URL 미설정 — .env 또는 nova.yaml에서 설정 필요", verdict="REQUEST_CHANGES", status="error")
 
     # 독립 심사위원 시스템 프롬프트 (Claude 1차와 완전히 다른 관점)
     system_prompt = f"""당신은 {project} 프로젝트의 **독립 품질 감사관**입니다.

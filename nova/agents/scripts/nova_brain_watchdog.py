@@ -103,9 +103,16 @@ def save_state(state: dict) -> None:
 
 # ── Telegram 알림 ─────────────────────────────────
 def send_alert(token: str, text: str) -> bool:
+    # P1 fix (2026-08-18, Codex-audited full-tree sweep): this used to
+    # unconditionally disable hostname/certificate verification for every
+    # Telegram Bot API call — the request URL embeds the bot token itself,
+    # so an unverified TLS connection exposes it (and alert contents) to a
+    # network MITM. Default to real verification; opt out explicitly via
+    # NOVA_DISABLE_SSL_VERIFY=1 for a self-signed internal proxy.
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode    = ssl.CERT_NONE
+    if os.environ.get("NOVA_DISABLE_SSL_VERIFY", "").strip().lower() in ("1", "true", "yes", "on"):
+        ctx.check_hostname = False
+        ctx.verify_mode    = ssl.CERT_NONE
     url    = f"https://api.telegram.org/bot{token}/sendMessage"
     params = {
         "chat_id": TG_CHAT_ID,

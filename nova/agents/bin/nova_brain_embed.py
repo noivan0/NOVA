@@ -158,12 +158,23 @@ def sync_new_embeddings():
         if not content or len(content) < 10:
             continue
 
+        embed_url = os.environ.get("NOVA_EMBEDDING_URL", "")
+        if not embed_url:
+            print("[ERROR] 환경변수 NOVA_EMBEDDING_URL 미설정 — .env 또는 nova.yaml에서 설정 필요 (임베딩 엔드포인트 URL)")
+            break
+
         try:
             resp = requests.post(
-                "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/openai/deployments/text-embedding-3-large/embeddings",
+                embed_url,
                 headers={"api-key": key, "Content-Type": "application/json"},
                 json={"input": content[:8000], "model": "text-embedding-3-large"},
-                timeout=30, verify=False
+                timeout=30,
+                # P1 fix (2026-08-18, Codex-audited): unconditional
+                # verify=False disabled TLS verification for every user;
+                # opt out explicitly via NOVA_DISABLE_SSL_VERIFY=1 for a
+                # self-signed internal gateway.
+                verify=os.environ.get("NOVA_DISABLE_SSL_VERIFY", "").strip().lower()
+                not in ("1", "true", "yes", "on")
             )
             resp.raise_for_status()
             vec = resp.json()["data"][0]["embedding"]
