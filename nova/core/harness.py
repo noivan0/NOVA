@@ -40,6 +40,28 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 
+def _packaged_harnesses_dir() -> Optional[Path]:
+    """Return the harnesses/ directory bundled inside the installed nova package.
+
+    P0 install fix: example harnesses (research, summarizer, data-pipeline, ...)
+    now ship as package data under ``nova/harnesses/`` (see pyproject.toml
+    package-data + MANIFEST.in). A fresh ``pip install nova-orchestrator`` does
+    NOT create a ``./harnesses`` directory in the user's current working
+    directory — only ``HarnessLoader`` falling back to the packaged copy makes
+    ``nova list`` / ``nova run <harness>`` work immediately after install with
+    no git clone and no extra setup step.
+    """
+    try:
+        import importlib.resources as ir
+
+        resource = ir.files("nova") / "harnesses"
+        if resource.is_dir():
+            return Path(str(resource))
+    except Exception:
+        pass
+    return None
+
+
 @dataclass
 class PhaseDefinition:
     id: str
@@ -103,20 +125,42 @@ class HarnessLoader:
 
     def __init__(self, harnesses_dir: str = "./harnesses"):
         self.harnesses_dir = Path(harnesses_dir)
+        # P0 install fix: if the configured/cwd harnesses dir doesn't exist or is
+        # empty (typical right after `pip install` with no git clone), fall back
+        # to the example harnesses bundled inside the installed package so
+        # `nova list` / `nova run <name>` work with zero extra setup.
+        self._fallback_dir: Optional[Path] = None
+        if not self._dir_has_harnesses(self.harnesses_dir):
+            packaged = _packaged_harnesses_dir()
+            if packaged is not None and self._dir_has_harnesses(packaged):
+                self._fallback_dir = packaged
+
+    @staticmethod
+    def _dir_has_harnesses(d: Path) -> bool:
+        if not d.exists():
+            return False
+        return any(
+            sub.is_dir() and (sub / "harness.yaml").exists() for sub in d.iterdir()
+        )
+
+    def _active_dir(self) -> Path:
+        return self._fallback_dir if self._fallback_dir is not None else self.harnesses_dir
 
     def list_harnesses(self) -> List[str]:
         """Return names of all discovered harnesses."""
-        if not self.harnesses_dir.exists():
+        active = self._active_dir()
+        if not active.exists():
             return []
         return [
             d.name
-            for d in sorted(self.harnesses_dir.iterdir())
+            for d in sorted(active.iterdir())
             if d.is_dir() and (d / "harness.yaml").exists()
         ]
 
     def load(self, name: str) -> HarnessDefinition:
         """Load a harness by name."""
-        path = self.harnesses_dir / name / "harness.yaml"
+        active = self._active_dir()
+        path = active / name / "harness.yaml"
         if not path.exists():
             raise FileNotFoundError(
                 f"Harness '{name}' not found at {path}. "
@@ -124,7 +168,7 @@ class HarnessLoader:
             )
         with open(path) as f:
             raw = yaml.safe_load(f)
-        return _parse_harness(raw, base_dir=self.harnesses_dir / name)
+        return _parse_harness(raw, base_dir=active / name)
 
     def load_from_file(self, path: str) -> HarnessDefinition:
         """Load a harness directly from a YAML file path."""

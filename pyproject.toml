@@ -55,6 +55,13 @@ Issues = "https://github.com/noivan0/NOVA/issues"
 where = ["."]
 include = ["nova*"]
 
+# P0 fix: harnesses/ was moved under nova/harnesses/ so it ships as package data
+# (previously top-level harnesses/ was silently excluded from every wheel/sdist,
+# so `pip install nova-orchestrator` followed by `nova list` reported
+# "No harnesses found in: ./harnesses" on every fresh install).
+[tool.setuptools.package-data]
+"nova" = ["harnesses/**/*"]
+
 [tool.black]
 line-length = 100
 target-version = ["py310"]

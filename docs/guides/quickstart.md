@@ -14,28 +14,52 @@ Get NOVA running in 5 minutes — harness pipelines, autonomous watchers, and al
 
 ## Step 1: Install
 
+> **Not on PyPI yet.** `nova-orchestrator` has not been published, so
+> `pip install nova-orchestrator` will fail with "No matching distribution
+> found". Until it is published, install directly from GitHub:
+
 ```bash
-# No API key — echo provider, perfect for first run
-pip install nova-orchestrator
+# No API key needed to try it — echo provider works out of the box
+pip install "nova-orchestrator[openai] @ git+https://github.com/noivan0/NOVA.git"
 
-# With OpenAI
-pip install "nova-orchestrator[openai]"
-
-# With Anthropic Claude
-pip install "nova-orchestrator[anthropic]"
-
-# With Ollama (local, no cost)
-pip install "nova-orchestrator[ollama]"
-
-# Everything
-pip install "nova-orchestrator[all]"
+# Or clone + editable install (recommended for development)
+git clone https://github.com/noivan0/NOVA.git
+cd NOVA
+pip install -e ".[openai]"     # swap [openai] for [anthropic] / [ollama] / [all] / omit for echo-only
 ```
 
 Verify:
 
 ```bash
 nova --version
-# nova 1.3.0
+# nova 1.4.0
+```
+
+### Try it immediately — zero config, zero API key
+
+`pip install`/`pip install -e .` does **not** require a `git clone`'s
+`harnesses/` folder anymore — example harnesses ship inside the package
+itself and `nova` falls back to them automatically:
+
+```bash
+nova list
+# Available harnesses (./harnesses):
+#   research [fanout] ...
+#   summarizer [pipeline] ...
+#   data-pipeline [pipeline] ...
+#   ... (21 built-in harnesses)
+
+NOVA_LLM_PROVIDER=echo nova run research --context topic="test" --dry-run
+# [nova] Starting research — run_id=...
+# ... completes without any API key or git clone
+```
+
+Want your own editable copy of the example harnesses + a starter `nova.yaml`
+in the current directory? Run:
+
+```bash
+nova init                 # copies research, summarizer, data-pipeline + nova.yaml
+nova init --all           # copies all 21 bundled harnesses
 ```
 
 ---

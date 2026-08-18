@@ -1,0 +1,4 @@
+# Ensure bundled example harnesses (YAML + prompts + scripts) ship inside
+# the sdist/wheel. Without this, `pip install nova-orchestrator` produces a
+# package with no runnable example harnesses (P0 install defect).
+recursive-include nova/harnesses *

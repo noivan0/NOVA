@@ -29,6 +29,29 @@ NOVA runs 24/7 without timers. It watches its own memory (SQLite DB), detects ch
 
 ## Quick Start
 
+### Option A — try a harness in under a minute (no API key, no full setup)
+
+```bash
+git clone https://github.com/noivan0/NOVA.git
+cd NOVA
+pip install -e .          # editable install; add [openai]/[anthropic]/[ollama]/[all] for a real LLM
+
+nova list                 # 21 built-in harnesses ship inside the package — no extra download
+NOVA_LLM_PROVIDER=echo nova run research --context topic="test" --dry-run
+```
+
+> `pip install nova-orchestrator` is **not available yet** (not published to
+> PyPI) — always install from the GitHub source above until that changes.
+
+This runs the `research` harness end-to-end with the built-in `echo`
+provider, so it works completely offline with zero credentials. Swap `echo`
+for `openai`/`anthropic`/`ollama` (see [Providers guide](docs/guides/providers.md))
+once you're ready to use a real model. See the
+[Quickstart guide](docs/guides/quickstart.md) for `nova init`, `nova setup`,
+and the full harness walkthrough.
+
+### Option B — full autonomous Agent OS (event loop, brain.db, 36 agents)
+
 ```bash
 # 1. Clone
 git clone https://github.com/noivan0/NOVA
