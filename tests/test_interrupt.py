@@ -14,16 +14,23 @@ test_interrupt.py — InterruptRouter 단위 테스트 (Phase 2)
 import sys
 import os
 import time
+from pathlib import Path
 
-# nova 패키지 경로 추가
-sys.path.insert(0, str(__import__("pathlib").Path.home() / "nova"))
+# Make sure the repo's own `nova` package is importable when this test file
+# is run directly (python tests/test_interrupt.py) as well as under pytest.
+# P1 fix (2026-08-18): this used to hardcode `Path.home() / "nova"`, which
+# only worked on the original author's personal machine (where a checkout
+# happened to live at ~/nova). On every other machine/CI runner it silently
+# missed the real domain_routing.yaml and the router fell back to
+# "no domain_routing.yaml" behavior, causing test_mms_domain_research to
+# fail regardless of the actual InterruptRouter implementation.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
 from nova.kernel.interrupt import InterruptKind, InterruptRouter
 
 
-ROUTING_YAML = str(
-    __import__("pathlib").Path.home() / "nova" / "nova" / "kernel" / "domain_routing.yaml"
-)
+ROUTING_YAML = str(_REPO_ROOT / "nova" / "kernel" / "domain_routing.yaml")
 
 
 def make_takes(claims: list[str], kind: str = "fact", holder: str = "hermes") -> list[dict]:
@@ -125,7 +132,15 @@ def test_should_trigger_cooldown():
 
 
 def test_route_returns_correct_harness():
-    """route() — mms 도메인 → 설정된 harness 반환."""
+    """route() — mms 도메인 → domain_routing.yaml에 설정된 harness 반환.
+
+    P1 fix (2026-08-18): domain_routing.yaml의 mms 도메인은 v3.0(nova/kernel/
+    domain_routing.yaml 커밋 이력 참고)부터 전용 `mms_research` harness로
+    라우팅하도록 바뀌었는데 이 테스트는 그 이전 값(`research`)을 그대로
+    기대하고 있어 stale했다. route()는 domain_routing.yaml 설정을
+    interrupt.harness보다 우선하므로(nova/kernel/interrupt.py route() 참고),
+    실제 설정값(mms_research)에 맞춰 기대값을 갱신한다.
+    """
     router = InterruptRouter(ROUTING_YAML)
     from nova.kernel.interrupt import Interrupt, InterruptKind
 
@@ -134,11 +149,11 @@ def test_route_returns_correct_harness():
         domain="mms",
         confidence=0.7,
         evidence=["T-GDI 세타3"],
-        harness="research",
+        harness="research",  # domain_routing.yaml이 우선하므로 이 값은 무시됨
         priority=2,
     )
     harness = router.route(intr)
-    assert harness == "research", f"harness가 'research'여야 함 — {harness}"
+    assert harness == "mms_research", f"harness가 'mms_research'여야 함 — {harness}"
     print(f"  ✅ route(mms) → '{harness}'")
 
 

@@ -339,7 +339,18 @@ class HMGProvider(LLMProvider):
         # CRITICAL-4 FIX: _KeyRotator 통합 — 429/401 시 keys.json round-robin 순환
         self._rotator = _KeyRotator(cfg.api_key or "")
         self._key = self._rotator.current()
-        raw = cfg.base_url or "https://h-chat-api.autoever.com/claude-code/v2"
+        # P1 fix (2026-08-18): base_url used to silently default to the
+        # original author's private enterprise gateway
+        # (h-chat-api.autoever.com). That is meaningless (and a minor infra
+        # info leak) for every other user — require an explicit base_url
+        # instead of guessing one.
+        if not cfg.base_url:
+            raise ValueError(
+                "HMGProvider requires an explicit base_url (nova.yaml llm.base_url "
+                "or NOVA_LLM_BASE_URL) — there is no universal public default for "
+                "this Anthropic-compatible gateway provider."
+            )
+        raw = cfg.base_url
         self._base = raw.rstrip("/").removesuffix("/v1")
         self.model = cfg.model or "claude-sonnet-4-6"
         self.max_tokens = getattr(cfg, "max_tokens", 4096)
@@ -494,11 +505,21 @@ def get_llm_provider(cfg: LLMConfig) -> LLMProvider:
         )
 
 
-# ── HMG 사내 헬퍼 ─────────────────────────────────────────────────────────────
+# ── Enterprise/private gateway helpers (opt-in only, not used by default) ──
+# P1 fix (2026-08-18): these two helpers previously defaulted base_url to
+# the original author's private HMG enterprise gateway
+# (internal-apigw-kr.hmg-corp.io) and disabled TLS verification
+# (verify=False), both appropriate only for that specific internal network.
+# Neither function is called anywhere in the default nova.core code paths —
+# they exist as opt-in utilities for users who explicitly wire up an
+# enterprise gateway. base_url is now a required keyword argument so a
+# caller can never silently inherit a meaningless private default, and TLS
+# verification defaults to on (verify=True) unless a caller explicitly opts
+# out for a self-signed internal endpoint.
 
-def hmg_embed(text: str, *, api_key: str,
-              base_url: str = "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/openai/deployments",
-              model: str = "text-embedding-3-large") -> "Optional[list[float]]":
+def hmg_embed(text: str, *, api_key: str, base_url: str,
+              model: str = "text-embedding-3-large",
+              verify: bool = True) -> "Optional[list[float]]":
     try:
         import requests
         from typing import Optional  # noqa: F401
@@ -508,7 +529,7 @@ def hmg_embed(text: str, *, api_key: str,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"input": text[:8000], "model": model},
             timeout=15,
-            verify=False,
+            verify=verify,
         )
         if r.status_code == 200:
             return r.json()["data"][0]["embedding"]
@@ -517,10 +538,10 @@ def hmg_embed(text: str, *, api_key: str,
         return None
 
 
-def hmg_image_generate(prompt: str, *, api_key: str,
-                        base_url: str = "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/models",
+def hmg_image_generate(prompt: str, *, api_key: str, base_url: str,
                         model: str = "gemini-3.1-flash-image-preview",
-                        fallback_model: str = "gemini-3-pro-image-preview") -> "Optional[str]":
+                        fallback_model: str = "",
+                        verify: bool = True) -> "Optional[str]":
     try:
         import requests
         payload = {
@@ -535,7 +556,7 @@ def hmg_image_generate(prompt: str, *, api_key: str,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
                 timeout=60,
-                verify=False,
+                verify=verify,
             )
             return r if r.status_code == 200 else None
 

@@ -261,6 +261,54 @@ def _run_bg(cmd: list[str], label: str, log_file: Path | None, timeout: int = 60
     threading.Thread(target=_worker, daemon=not is_chain).start()
 
 
+def _apply_master_key_llm_defaults(master_key: str, nova_yaml_path: Path | None = None) -> None:
+    """Master API key 발견 시 LLM provider/model env 기본값을 채운다.
+
+    P1 fix (2026-08-18, Codex-audited round 2): 이 함수는 원래
+    NOVA_LLM_PROVIDER=hmg를 무조건 선택했는데, HMGProvider가 base_url 없이는
+    ValueError를 던지도록 강화된 후(nova/providers/llm.py) NOVA_LLM_BASE_URL이
+    설정되지 않은 환경(전형적으로 direct brain-watcher 실행)에서 즉시
+    크래시하는 회귀를 만들었다 — Codex cold audit이 실제로 재현해 발견.
+    NOVA_LLM_BASE_URL이 이미 설정된 경우에만 hmg를 선택하고, 그렇지 않으면
+    API 키 없이 동작하는 공개 echo provider로 폴백한다.
+
+    P1 fix round 3 (같은 날, Codex 재감사): 최초 수정은 os.environ만 확인해서
+    "base_url이 nova.yaml에만 설정되고 환경변수로는 없는" 흔한 케이스에서
+    잘못 echo를 선택했다. 이 함수가 os.environ["NOVA_LLM_PROVIDER"]="echo"를
+    setdefault로 심으면, 이후 load_config()의 _apply_env()가 (yaml보다
+    나중에 적용되는) 이 env var를 최우선으로 적용해 YAML에 명시적으로 적어둔
+    provider: hmg 설정 자체를 통째로 무시해버린다 — Codex가 실제 재현 스크립트로
+    입증(session 20260818_112743_12a498). nova_yaml_path를 받아 YAML의
+    llm.base_url도 함께 확인하도록 수정.
+
+    함수로 분리한 이유: 순수 로직(입력=환경/설정 상태, 출력=env 변경)만 독립
+    테스트하기 위함 — 원래는 _run_harness_bg() 내부 클로저에 인라인되어 있어
+    단위 테스트가 불가능했다.
+    """
+    has_base_url = bool(os.environ.get("NOVA_LLM_BASE_URL"))
+    if not has_base_url and nova_yaml_path is not None:
+        try:
+            import yaml as _yaml
+            if nova_yaml_path.exists():
+                _raw = _yaml.safe_load(nova_yaml_path.read_text()) or {}
+                has_base_url = bool((_raw.get("llm") or {}).get("base_url"))
+        except Exception:
+            pass  # YAML을 못 읽어도 echo 폴백으로 안전하게 계속 진행
+
+    if has_base_url:
+        os.environ.setdefault("NOVA_LLM_PROVIDER", "hmg")
+        os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-4-6")
+    else:
+        os.environ.setdefault("NOVA_LLM_PROVIDER", "echo")
+    # setdefault 대신 강제 덮어쓰기: 셸에서 구키가 export된 채로
+    # watcher를 시작해도 .env/.config.yaml의 최신 키가 항상 우선함
+    for _var in ("NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
+                 "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY",
+                 "NOVA_CODEX_API_KEY", "NOVA_IMAGE_GEN_API_KEY",
+                 "HERMES_MASTER_APIKEY"):
+        os.environ[_var] = master_key
+
+
 def _run_harness_bg(harness_name: str, log_file: Path | None,
                     timeout: int = 300, context: dict | None = None) -> None:
     """Harness를 백그라운드 스레드에서 Python API로 직접 실행.
@@ -303,16 +351,7 @@ def _run_harness_bg(harness_name: str, log_file: Path | None,
                         _hcfg = _yaml.safe_load(_hcfg_path.read_text()) or {}
                         _master_key = _hcfg.get("model", {}).get("api_key", "")
                 if _master_key:
-                    os.environ.setdefault("NOVA_LLM_PROVIDER", "hmg")
-                    os.environ.setdefault("NOVA_LLM_BASE_URL", "https://h-chat-api.autoever.com/claude-code/v2")
-                    os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-4-6")
-                    # setdefault 대신 강제 덮어쓰기: 셸에서 구키가 export된 채로
-                    # watcher를 시작해도 .env/.config.yaml의 최신 키가 항상 우선함
-                    for _var in ("NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
-                                 "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY",
-                                 "NOVA_CODEX_API_KEY", "NOVA_IMAGE_GEN_API_KEY",
-                                 "HERMES_MASTER_APIKEY"):
-                        os.environ[_var] = _master_key
+                    _apply_master_key_llm_defaults(_master_key, nova_yaml_path=nova_home / "nova.yaml")
             except Exception:
                 pass  # API key 주입 실패해도 계속 진행
 

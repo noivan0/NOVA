@@ -44,23 +44,39 @@ class PublisherConfig:
 
 @dataclass
 class CodexConfig:
-    """HMG Codex (GPT-5.4) 보조 LLM 설정"""
+    """Optional secondary/judge LLM config (e.g. for cross-model review).
+
+    P1 fix (2026-08-18): base_url used to default to the original author's
+    private enterprise gateway (h-chat-api.autoever.com). That value is
+    meaningless to every other user and leaked internal infrastructure
+    details into a public default. There is no universal public default for
+    a "Codex"-style secondary judge endpoint, so this now defaults to empty
+    and MUST be set explicitly via nova.yaml or NOVA_CODEX_BASE_URL when the
+    "codex" LLM provider is used — see .env.example for the public OpenAI
+    equivalent (NOVA_LLM_PROVIDER=openai etc.).
+    """
     provider: str = "openai"
-    model: str = "gpt-5.4"
+    model: str = "gpt-4o"
     api_key: str = ""
-    base_url: Optional[str] = "https://h-chat-api.autoever.com/codex-cli/v2"
+    base_url: Optional[str] = None
     max_tokens: int = 4096
     temperature: float = 0.7
 
 
 @dataclass
 class ImageGenConfig:
-    """HMG Gemini 이미지 생성 설정"""
-    provider: str = "hmg_gemini"
-    model: str = "gemini-3.1-flash-image-preview"
-    fallback_model: str = "gemini-3-pro-image-preview"
-    api_key: str = ""   # 마스터 키와 동일; 비어있으면 NOVA_LLM_API_KEY 사용
-    base_url: str = "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/models"
+    """Optional image-generation provider config.
+
+    P1 fix (2026-08-18): base_url used to default to a private enterprise
+    Gemini gateway (internal-apigw-kr.hmg-corp.io). Left empty by default —
+    set explicitly via nova.yaml/env vars for whichever image provider you
+    actually have credentials for.
+    """
+    provider: str = ""
+    model: str = ""
+    fallback_model: str = ""
+    api_key: str = ""
+    base_url: str = ""
 
 
 @dataclass
@@ -68,10 +84,14 @@ class KBConfig:
     path: str = "./kb"
     auto_record: bool = True
     embedding_enabled: bool = False
-    embedding_provider: str = "hmg_openai"
+    embedding_provider: str = ""
     embedding_model: str = "text-embedding-3-large"
-    embedding_base_url: str = "https://internal-apigw-kr.hmg-corp.io/hchat-in/api/v3/openai/deployments"
-    embedding_api_key: str = ""   # 마스터 키와 동일; 비어있으면 NOVA_LLM_API_KEY 사용
+    # P1 fix (2026-08-18): used to default to a private enterprise embedding
+    # gateway (internal-apigw-kr.hmg-corp.io). Public default is the real
+    # OpenAI embeddings endpoint; override via nova.yaml/env for self-hosted
+    # or enterprise gateways.
+    embedding_base_url: str = "https://api.openai.com/v1/embeddings"
+    embedding_api_key: str = ""   # falls back to NOVA_LLM_API_KEY if empty
 
 
 @dataclass

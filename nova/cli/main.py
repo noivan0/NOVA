@@ -723,11 +723,17 @@ def _cmd_watcher(args) -> None:
         else:
             log = pid_dir / "brain_watcher.log"
             import os as _os
-            _watcher_env = {**_os.environ,
-                "NOVA_LLM_PROVIDER": "hmg",
-                "NOVA_LLM_BASE_URL": "https://h-chat-api.autoever.com/claude-code/v2",
-                "NOVA_LLM_MODEL": "claude-sonnet-4-6",
-            }
+            # P1 fix (2026-08-18): this used to unconditionally force
+            # NOVA_LLM_PROVIDER/BASE_URL/MODEL to the original author's
+            # private enterprise gateway (h-chat-api.autoever.com) into the
+            # watcher subprocess env, silently overriding whatever the user
+            # had already configured (their own NOVA_LLM_PROVIDER=openai,
+            # a .env file, etc.). Only fill in a default when the user has
+            # not set one, and default to the public `echo` provider (no
+            # API key required) rather than a private gateway that is
+            # meaningless — and would fail — for every other user.
+            _watcher_env = {**_os.environ}
+            _watcher_env.setdefault("NOVA_LLM_PROVIDER", "echo")
             proc = subprocess.Popen(
                 [sys.executable, "-m", "nova.watcher.brain", "--nova-home", nova_home_str],
                 stdout=open(log, "a"), stderr=subprocess.STDOUT,

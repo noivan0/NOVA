@@ -29,7 +29,16 @@ from nova.kernel.ownership import OwnershipRules
 # ── 픽스처 ───────────────────────────────────────────────────────────────────
 
 def _create_brain_db(path: str) -> None:
-    """테스트용 brain.db 생성 (최소 스키마)."""
+    """테스트용 brain.db 생성 (최소 스키마).
+
+    P1 fix (2026-08-18): nova_events 테이블이 빠져 있어 KernelAPI.spawn()
+    호출 시 "no such table: nova_events"로 실패했다. spawn()이 실제로
+    INSERT하는 정확한 컬럼 구성(nova/kernel/syscall.py의 spawn() 참고:
+    id, event_type, severity, title, detail, source_agent, is_read,
+    created_at)과 일치하는 테이블을 추가한다. nova/db/schema.py의
+    BRAIN_SCHEMA(nova_events)와는 컬럼명이 다르므로(source vs source_agent)
+    KernelAPI가 실제로 쓰는 스키마 그대로 정의한다.
+    """
     conn = sqlite3.connect(path)
     conn.executescript(
         """
@@ -55,6 +64,17 @@ def _create_brain_db(path: str) -> None:
             weight      REAL DEFAULT 0.5,
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS nova_events (
+            id            TEXT PRIMARY KEY,
+            event_type    TEXT NOT NULL,
+            severity      TEXT DEFAULT 'INFO',
+            title         TEXT NOT NULL,
+            detail        TEXT,
+            source_agent  TEXT,
+            is_read       INTEGER DEFAULT 0,
+            created_at    TEXT NOT NULL
         );
         """
     )
@@ -217,7 +237,19 @@ def test_case7_agent_auto_assigned_workspace(api: KernelAPI, brain_db: str) -> N
 # ── 케이스 8: ownership.yaml 없어도 기본값으로 동작 ──────────────────────────
 
 def test_case8_no_yaml_fallback(brain_db: str, tmp_path: Path) -> None:
-    """케이스 8: 존재하지 않는 yaml 경로를 줘도 기본값으로 동작."""
+    """케이스 8: 존재하지 않는 yaml 경로를 줘도 기본값으로 동작.
+
+    P1 fix (2026-08-18): 원래 이 테스트는 "some/path/file.md"로 kb_write를
+    호출해 NovaPermissionError를 기대했지만, _validate_path()의 경로
+    화이트리스트(C-1/C-2 보안 수정, _ALLOWED_ROOTS)가 나중에 추가되면서
+    이 경로는 애초에 허용 루트 밖이라 소유권 검사(can_write)까지 가지도
+    못하고 NovaSyscallError("허용되지 않은 경로 루트")를 먼저 던진다.
+    NovaSyscallError는 NovaPermissionError의 부모 클래스라
+    pytest.raises(NovaPermissionError)는 매칭되지 않아 실패했다.
+    이 테스트의 실제 의도(ownership.yaml 없음 → allow_unknown=False 기본값
+    으로 알 수 없는 에이전트의 쓰기가 거부되는지)를 검증하려면 경로 자체는
+    허용된 루트("workspace/") 안에 있어야 한다.
+    """
     missing_yaml = str(tmp_path / "nonexistent.yaml")
     api = KernelAPI(brain_db=brain_db, ownership_yaml=missing_yaml)
 
@@ -225,10 +257,10 @@ def test_case8_no_yaml_fallback(brain_db: str, tmp_path: Path) -> None:
     result = api.kb_read(query="테스트", agent="any-agent")
     assert isinstance(result, list)
 
-    # 기본값: allow_unknown=False → 쓰기 실패
+    # 기본값: allow_unknown=False → 쓰기 실패 (허용된 루트 안의 경로 사용)
     with pytest.raises(NovaPermissionError):
         api.kb_write(
-            path="some/path/file.md",
+            path="workspace/some/path/file.md",
             content="내용",
             agent="any-agent",
         )
@@ -267,7 +299,15 @@ def test_take_write_returns_id(api: KernelAPI) -> None:
 
 
 def test_spawn_returns_run_id(api: KernelAPI) -> None:
-    """spawn 이 UUID 형태의 run_id 를 반환."""
-    run_id = api.spawn(harness="nova-dev-harness", task="PR 작성", agent="nova-dev")
-    assert run_id is not None
-    assert len(run_id) == 36
+    """spawn 이 run_id(UUID4)를 담은 RunHandle 을 반환.
+
+    P1 fix (2026-08-18): spawn()의 실제 반환 타입은 RunHandle 데이터클래스
+    (nova/kernel/syscall.py RunHandle 참고)이지 str이 아니다. 이 테스트는
+    len(run_id)로 UUID 길이(36)를 직접 검증하려다 RunHandle에 __len__이
+    없어 TypeError로 실패했다. RunHandle.run_id 속성을 통해 실제 UUID4
+    문자열을 검증하도록 수정.
+    """
+    handle = api.spawn(harness="nova-dev-harness", task="PR 작성", agent="nova-dev")
+    assert handle is not None
+    assert hasattr(handle, "run_id"), "spawn()은 RunHandle(run_id=...)을 반환해야 함"
+    assert len(handle.run_id) == 36  # UUID4 문자열 길이
