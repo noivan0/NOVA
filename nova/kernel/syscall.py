@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -428,11 +429,37 @@ class KernelAPI:
 
     # ── Spawn ─────────────────────────────────────────────────────────────────
 
+    # 하네스 이름은 파일시스템 세그먼트 하나여야 한다 (HarnessLoader.load()가
+    # `harnesses_dir / name / harness.yaml` 로 결합하는 것과 동일한 신뢰 모델).
+    _HARNESS_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
     def spawn(self, harness: str, task: str, agent: str) -> RunHandle:
         """하네스 실행 요청 기록.
 
         nova_events 테이블에 실행 요청을 기록하고 run_id 를 반환한다.
         실제 실행은 별도의 하네스 런처가 담당한다.
+
+        SECURITY-011 (2026-08-18, deep audit round 4): `harness` was
+        accepted with zero validation and stored verbatim in
+        `nova_events.title` as `f"spawn:{harness}"`. brain_watcher's
+        spawn-polling loop (nova/watcher/brain.py) later extracts this
+        title back out with a naive `split(":", 1)[1]` and passes it
+        straight to `HarnessLoader.load(harness_name)`. Reproduced:
+        `spawn(harness="../../../etc/passwd", ...)` was accepted and
+        persisted verbatim with no error. HarnessLoader.load() itself now
+        rejects traversal (SECURITY-008), but `spawn()` is a *separate*
+        trust boundary — any code with brain.db write access (not
+        necessarily anything that should be allowed to pick which
+        harness runs) could otherwise queue an arbitrary/malformed
+        harness name. Reject anything that isn't a plain filesystem-safe
+        segment before it's ever persisted.
+
+        Note: `agent` is NOT currently checked against ownership.yaml
+        for this operation — ownership.yaml's rule schema is entirely
+        path-based (which KB paths an agent may read/write), and there
+        is no equivalent "which harnesses may this agent spawn" concept
+        yet. This is a known design gap, not something this fix
+        resolves; flagged in KB for a future RBAC-style extension.
 
         Parameters
         ----------
@@ -448,6 +475,20 @@ class KernelAPI:
         str
             run_id (UUID4)
         """
+        # SECURITY-013 (2026-08-18, Codex-audited round 4, self-caught in
+        # verification): re.match() lets Python's re engine treat `$` as
+        # matching just before a trailing newline (not only end-of-string),
+        # so "research\n" incorrectly passed this "whitelist" check --
+        # confirmed: _HARNESS_NAME_RE.match("research\n") was truthy.
+        # brain.py's downstream .strip() happens to neutralize this
+        # specific payload today, but that's incidental, not a guarantee
+        # -- the validation itself should be airtight on its own.
+        # re.fullmatch() anchors both ends unconditionally.
+        if not self._HARNESS_NAME_RE.fullmatch(harness):
+            raise NovaSyscallError(
+                f"허용되지 않은 하네스 이름: {harness!r} "
+                f"(영문/숫자/-/_ 만 허용, 1~128자)"
+            )
         run_id = str(uuid.uuid4())
         now = self._now()
 
