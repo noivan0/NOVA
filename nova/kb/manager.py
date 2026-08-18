@@ -91,16 +91,45 @@ class KBManager:
         (self.root / "log.md").touch(exist_ok=True)
         (self.root / "index.md").touch(exist_ok=True)
 
+    def _safe_page_path(self, name: str, subdir: str = "") -> Path:
+        """Resolve (name, subdir) to a .md path guaranteed to be under self.root.
+
+        SECURITY-007 (2026-08-18, Codex-audited deep audit): write()/read()/
+        pages() composed `self.root / subdir / f"{name}.md"` with no
+        traversal check at all. Codex reproduced a real file written
+        OUTSIDE self.root via write(name="../escaped", ...). Both `name`
+        and `subdir` are rejected outright if they contain '..' or are
+        absolute, then the final resolved path is hard-verified to be a
+        descendant of self.root (relative_to() check) — same
+        defense-in-depth pattern as nova.core.kb.KB._resolve() and
+        nova.kernel.syscall.KernelAPI._validate_path().
+        """
+        for label, value in (("name", name), ("subdir", subdir)):
+            if not value:
+                continue
+            if ".." in Path(value).parts or Path(value).is_absolute():
+                raise ValueError(f"KB {label} must not contain '..' or be absolute: {value!r}")
+
+        target_dir = (self.root / subdir) if subdir else self.root
+        candidate = (target_dir / f"{name}.md").resolve()
+        try:
+            candidate.relative_to(self.root.resolve())
+        except ValueError:
+            raise ValueError(
+                f"KB page resolves outside the KB root, refusing: "
+                f"name={name!r} subdir={subdir!r} -> {candidate}"
+            )
+        return candidate
+
     # ------------------------------------------------------------------ #
     # Read                                                                 #
     # ------------------------------------------------------------------ #
 
     def read(self, name: str, subdir: str = "") -> Optional[KBPage]:
         """Read a KB page by name (without .md extension)."""
-        candidates = [
-            self.root / subdir / f"{name}.md",
-            self.root / f"{name}.md",
-        ]
+        candidates = [self._safe_page_path(name, subdir)]
+        if subdir:
+            candidates.append(self._safe_page_path(name))
         for path in candidates:
             if path.exists():
                 return self._parse(path)
@@ -112,7 +141,13 @@ class KBManager:
 
     def pages(self, subdir: str = "", status_filter: str = "") -> list[KBPage]:
         """List all KB pages, optionally filtered by subdir and status."""
-        search_root = self.root / subdir if subdir else self.root
+        if subdir and (".." in Path(subdir).parts or Path(subdir).is_absolute()):
+            raise ValueError(f"KB subdir must not contain '..' or be absolute: {subdir!r}")
+        search_root = (self.root / subdir).resolve() if subdir else self.root
+        try:
+            search_root.relative_to(self.root.resolve())
+        except ValueError:
+            raise ValueError(f"KB subdir resolves outside the KB root: {subdir!r}")
         results = []
         for md in search_root.rglob("*.md"):
             if md.name in {"SCHEMA.md", "index.md", "log.md"}:
@@ -147,9 +182,8 @@ class KBManager:
         if status not in VALID_STATUSES:
             raise ValueError(f"Invalid status {status!r}. Must be one of {VALID_STATUSES}")
 
-        target_dir = (self.root / subdir) if subdir else self.root
-        target_dir.mkdir(parents=True, exist_ok=True)
-        path = target_dir / f"{name}.md"
+        path = self._safe_page_path(name, subdir)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         today = date.today().isoformat()
         fm: dict[str, Any] = {

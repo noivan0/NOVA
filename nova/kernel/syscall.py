@@ -483,7 +483,22 @@ class KernelAPI:
         with self._write_lock:
             with self._connect() as conn:
                 for item in items:
-                    path       = item["path"]
+                    # SECURITY-005 (2026-08-18, deep audit): kb_write_batch()
+                    # never called _validate_path(), unlike kb_write()/
+                    # kb_delete(). can_write() alone is insufficient because
+                    # ownership.yaml glob patterns (e.g. "workspace/**") are
+                    # matched against the RAW unnormalized string — a path
+                    # like "workspace/../../../etc/cron.d/evil" still starts
+                    # with "workspace/" and matches, then gets written to
+                    # the DB verbatim with the traversal intact (reproduced:
+                    # an agent with only "workspace/**" write access could
+                    # persist an unnormalized ../-escaping path via this
+                    # method alone, bypassing the exact same input kb_write()
+                    # correctly rejects). Apply the same path validation as
+                    # kb_write() before the permission check, using the
+                    # normalized path for both can_write() and storage so
+                    # the two APIs enforce identical policy.
+                    path       = self._validate_path(item["path"])
                     content    = item["content"]
                     agent      = item["agent"]
                     page_type  = item.get("page_type", "general")

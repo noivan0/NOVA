@@ -559,9 +559,40 @@ class Orchestrator:
         context: Dict[str, Any],
         timeout: int,
     ) -> PhaseResult:
-        cmd = phase.command
-        for k, v in context.items():
-            cmd = cmd.replace(f"{{{{{k}}}}}", str(v))
+        # SECURITY-003 (2026-08-18, deep audit): {{var}} placeholders used to
+        # be substituted with str(v) raw and run under shell=True. `context`
+        # is not harness-author-controlled — it is populated from CLI
+        # `--context key=value` flags and can be attacker-controlled at
+        # runtime (nova run <harness> --context topic='; rm -rf ~ #'
+        # reproduced arbitrary command execution). Every substituted value
+        # is shell-quoted with shlex.quote() so it is always treated as a
+        # single opaque argument, never as shell syntax, regardless of
+        # where the harness author placed the {{var}} in the command
+        # string.
+        #
+        # SECURITY-006 (2026-08-18, Codex-audited round 2): the first fix
+        # looped `for k, v in context.items(): cmd = cmd.replace(...)`,
+        # applying each substitution to the ALREADY-substituted string.
+        # If one context value's raw text happened to contain another
+        # key's literal placeholder (e.g. context={"a": "{{b}}", "b": "; rm
+        # -rf ~"}), inserting the quoted "a" value first plants a literal
+        # "{{b}}" string into the command, which the *next* iteration then
+        # matches and substitutes with "b"'s raw value — reinjecting shell
+        # syntax inside what looked like a safely-quoted region. Codex
+        # reproduced this end-to-end (real file created via chained
+        # substitution). Fixed by doing a SINGLE non-recursive pass over
+        # the ORIGINAL command with re.sub(), so a substituted value's
+        # contents are never re-scanned for further placeholders.
+        import re
+        import shlex
+
+        def _substitute(match: "re.Match[str]") -> str:
+            key = match.group(1)
+            if key not in context:
+                return match.group(0)  # leave unknown placeholders untouched
+            return shlex.quote(str(context[key]))
+
+        cmd = re.sub(r"\{\{(\w+)\}\}", _substitute, phase.command)
 
         if self.config.dry_run:
             print(f"[nova][dry-run] shell: {cmd}")

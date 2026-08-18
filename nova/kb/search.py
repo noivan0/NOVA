@@ -191,8 +191,19 @@ class KBSearch:
 
         results = []
         for row_id, path, title, chunk_idx, emb_blob, char_count in rows:
-            # Read the actual file content for keyword scoring + snippet
-            full_path = Path(kb_root) / path if not Path(path).is_absolute() else Path(path)
+            # SECURITY-009 (2026-08-18, Codex-audited round 3): if a `path`
+            # value in the embeddings DB were ever absolute (or escaped
+            # kb_root via ../), this used to read it verbatim — an
+            # arbitrary-file-read primitive if anything ever wrote such a
+            # row (nova/kb/sync.py, the only normal writer, always stores
+            # kb-root-relative paths via md_path.relative_to(self.kb_root),
+            # but defense-in-depth doesn't rely on that holding forever).
+            # Resolve the path under kb_root and refuse to read outside it.
+            full_path = (Path(kb_root) / path).resolve()
+            try:
+                full_path.relative_to(Path(kb_root).resolve())
+            except ValueError:
+                continue  # row's path escapes kb_root — skip, don't disclose
             try:
                 content = full_path.read_text(errors="replace")
             except OSError:

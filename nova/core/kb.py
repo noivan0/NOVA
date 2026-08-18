@@ -125,12 +125,34 @@ class KB:
     # ------------------------------------------------------------------ #
 
     def _resolve(self, key: str) -> Path:
-        """Convert a KB key (e.g. 'projects/my-harness') to a file path."""
-        # Sanitize: prevent path traversal
-        key = key.lstrip("/").replace("..", "")
+        """Convert a KB key (e.g. 'projects/my-harness') to a file path.
+
+        SECURITY-004 (2026-08-18, deep audit): the previous sanitizer
+        (`key.lstrip("/").replace("..", "")`) is a single-pass string
+        replace, not a real path-traversal defense. A key like
+        '../../../../../../tmp/evil' has its '..' segments removed
+        (`.replace` deletes them without re-scanning), which paradoxically
+        collapses into leading slashes / an absolute-looking remainder that
+        `Path.__truediv__` then treats as an absolute path, silently
+        discarding `self.root` entirely — verified with a real write()
+        landing outside self.root (e.g. via `nova kb write` CLI). Fixed with
+        defense-in-depth: reject any key containing '..' outright (no
+        silent stripping), then resolve the final path and hard-fail if it
+        does not land under self.root.
+        """
+        key = key.lstrip("/")
+        if ".." in key:
+            raise ValueError(f"KB key must not contain '..': {key!r}")
         if not key.endswith(".md"):
             key = key + ".md"
-        return self.root / key
+        candidate = (self.root / key).resolve()
+        try:
+            candidate.relative_to(self.root.resolve())
+        except ValueError:
+            raise ValueError(
+                f"KB key resolves outside the KB root, refusing: {key!r} -> {candidate}"
+            )
+        return candidate
 
     def _to_key(self, path: Path) -> str:
         """Convert an absolute file path back to a KB key."""

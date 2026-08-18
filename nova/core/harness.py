@@ -158,9 +158,28 @@ class HarnessLoader:
         ]
 
     def load(self, name: str) -> HarnessDefinition:
-        """Load a harness by name."""
+        """Load a harness by name.
+
+        SECURITY-008 (2026-08-18, Codex-audited round 3): `name` used to be
+        joined into a path with zero validation, so `load("../outside")`
+        could escape the harnesses directory entirely and load an
+        attacker-planted harness.yaml from anywhere on disk (Codex
+        reproduced this loading a harness.yaml outside `active/`, whose
+        `output_file: ../../escaped-output.md` could then write outside
+        the intended workspace). `load(name)` is a name-based lookup by
+        design — anyone needing to load an arbitrary file path already has
+        `load_from_file()` for that. Reject any name that escapes the
+        active harnesses directory.
+        """
         active = self._active_dir()
-        path = active / name / "harness.yaml"
+        candidate_dir = (active / name).resolve()
+        try:
+            candidate_dir.relative_to(active.resolve())
+        except ValueError:
+            raise ValueError(
+                f"Harness name must not escape the harnesses directory: {name!r}"
+            )
+        path = candidate_dir / "harness.yaml"
         if not path.exists():
             raise FileNotFoundError(
                 f"Harness '{name}' not found at {path}. "
@@ -168,7 +187,7 @@ class HarnessLoader:
             )
         with open(path) as f:
             raw = yaml.safe_load(f)
-        return _parse_harness(raw, base_dir=active / name)
+        return _parse_harness(raw, base_dir=candidate_dir)
 
     def load_from_file(self, path: str) -> HarnessDefinition:
         """Load a harness directly from a YAML file path."""
