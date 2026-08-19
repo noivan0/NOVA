@@ -426,6 +426,18 @@ class CodexResponsesProvider(LLMProvider):
     chat.completions.create()가 만드는 base_url+"/chat/completions" 경로는 게이트웨이에
     존재하지 않아 404가 발생한다. requests로 {"model","input"} POST 직접 호출.
     응답 스키마: {"output": [{"content": [{"type":"output_text","text":"..."}]}]}
+
+    SECURITY-017 (2026-08-18, deep audit round 6): the P1 audit (2026-08-18)
+    swept AnthropicProvider/hmg_embed/hmg_image_generate to make TLS
+    verification opt-in (defaulting to on), matching the "opt-in only" TLS
+    bypass principle established there -- but missed this provider, which
+    called `requests.post(..., verify=False)` unconditionally with no way
+    to opt back into verification. That's a real MITM exposure for every
+    request this provider makes, not just an internal-network convenience.
+    Fixed to follow the same pattern as AnthropicProvider: verification is
+    on by default, and only disabled if the operator explicitly sets
+    NOVA_SSL_VERIFY=false (documented as appropriate only for a trusted
+    self-signed internal gateway).
     """
 
     _MAX_KEY_RETRIES = 3
@@ -438,6 +450,8 @@ class CodexResponsesProvider(LLMProvider):
         self.model = cfg.model
         self.max_tokens = cfg.max_tokens
         self._rotator = _KeyRotator(cfg.api_key or "")
+        import os
+        self._verify_tls = os.environ.get("NOVA_SSL_VERIFY", "true").lower() not in ("false", "0", "no")
 
     def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
         import requests
@@ -452,7 +466,7 @@ class CodexResponsesProvider(LLMProvider):
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json=payload,
                     timeout=timeout,
-                    verify=False,
+                    verify=self._verify_tls,
                 )
                 if r.status_code == 429 and self._rotator.total() > 1:
                     self._rotator.rotate()

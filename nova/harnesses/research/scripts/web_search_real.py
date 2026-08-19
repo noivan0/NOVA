@@ -2,7 +2,18 @@
 """
 research harness - web_search phase 실행 스크립트 v2
 DuckDuckGo HTML POST 방식으로 실제 웹 검색 수행
-HMG 사내망 SSL 우회 (verify=False)
+
+SECURITY-018 (2026-08-18, deep audit round 6): this script unconditionally
+disabled TLS certificate verification (verify=False) on every request to
+duckduckgo.com, both in the direct requests.post() call and in the
+subprocess-isolated inline script. The P1 audit (2026-08-18) swept
+nova/agents/ and nova/providers/llm.py to make this opt-in only (an
+enterprise-network convenience some users may need, never a default),
+but missed this bundled harness script. This is a real MITM exposure --
+an attacker on the network path could intercept "real web search" traffic
+and inject arbitrary content that ends up in `web_research.md` and, from
+there, in the KB/takes this harness produces. Fixed to verify by default,
+disabling only if the operator explicitly sets NOVA_SSL_VERIFY=false.
 """
 import sys
 import os
@@ -12,21 +23,24 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
+_VERIFY_TLS = os.environ.get("NOVA_SSL_VERIFY", "true").lower() not in ("false", "0", "no")
+
 
 def search_ddg_html(topic: str, max_results: int = 8) -> list:
-    """DDG HTML POST 방식으로 실제 웹 검색 (SSL 우회)"""
+    """DDG HTML POST 방식으로 실제 웹 검색"""
     try:
         import requests
         import warnings
-        warnings.filterwarnings("ignore")
-        if hasattr(requests.packages, 'urllib3'):
-            requests.packages.urllib3.disable_warnings()
+        if not _VERIFY_TLS:
+            warnings.filterwarnings("ignore")
+            if hasattr(requests.packages, 'urllib3'):
+                requests.packages.urllib3.disable_warnings()
 
         resp = requests.post(
             "https://html.duckduckgo.com/html/",
             data={"q": topic},
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-            verify=False,
+            verify=_VERIFY_TLS,
             timeout=15,
         )
         if resp.status_code != 200:
@@ -57,19 +71,22 @@ def search_ddg_html(topic: str, max_results: int = 8) -> list:
 
 def search_ddg_subprocess(topic: str, max_results: int = 6) -> list:
     """system python3에서 requests로 검색 (환경 격리 우회)"""
+    verify_literal = "True" if _VERIFY_TLS else "False"
     code = f"""
 import requests, re, json, warnings
-warnings.filterwarnings('ignore')
-try:
-    requests.packages.urllib3.disable_warnings()
-except Exception:
-    pass
+_verify = {verify_literal}
+if not _verify:
+    warnings.filterwarnings('ignore')
+    try:
+        requests.packages.urllib3.disable_warnings()
+    except Exception:
+        pass
 try:
     resp = requests.post(
         'https://html.duckduckgo.com/html/',
         data={{'q': {json.dumps(topic)}}},
         headers={{'User-Agent': 'Mozilla/5.0'}},
-        verify=False, timeout=15
+        verify=_verify, timeout=15
     )
     hrefs  = re.findall(r'<a rel="nofollow" class="result__a" href="([^"]+)"', resp.text)
     titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', resp.text, re.DOTALL)
