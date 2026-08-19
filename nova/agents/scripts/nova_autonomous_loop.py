@@ -5,7 +5,7 @@ NOVA 자율 감사 루프 오케스트레이터
 - 매 2시간마다 자동 실행
 - 결과는 KB에 저장 + 이슈 발견 시 헤르 운영 토픽(thread_id=9)으로 알림
 """
-import subprocess, os, json, re
+import subprocess, os, json, re, shlex
 from datetime import datetime
 from pathlib import Path
 
@@ -25,8 +25,21 @@ def run(cmd, **kwargs):
     return r.stdout + r.stderr
 
 def get_ready_tasks(board):
-    """보드에서 ready 상태 태스크 목록 가져오기"""
-    out = run(f"hermes kanban boards switch {board} 2>/dev/null && hermes kanban list --status ready 2>&1")
+    """보드에서 ready 상태 태스크 목록 가져오기.
+
+    SECURITY-014 (2026-08-18, deep audit round 5, defense-in-depth):
+    `board`/`task['id']` were f-string-interpolated directly into a
+    shell=True command. `task['id']` is already regex-constrained to
+    `t_[a-f0-9]+` by the caller before this runs, but `board` comes from
+    nova_boards.json (an operator-managed local config file, not harness
+    input) with no format check at all -- a board name containing shell
+    metacharacters would break/inject into the command. This file is
+    part of noivan's personal multi-project automation (documented in
+    the P1 audit as not harness-controlled), so this is not a remotely
+    exploitable vulnerability, but shlex.quote() costs nothing and
+    removes the fragility for any future caller of this function.
+    """
+    out = run(f"hermes kanban boards switch {shlex.quote(board)} 2>/dev/null && hermes kanban list --status ready 2>&1")
     tasks = []
     for line in out.split("\n"):
         m = re.search(r"(t_[a-f0-9]+)\s+ready\s+\(([^)]+)\)\s+(.+)", line)
@@ -47,7 +60,9 @@ def dispatch_task(board, task):
         return False, f"프로필 없음: {assignee}"
     
     # kanban dispatch로 에이전트 실행
-    out = run(f"hermes kanban boards switch {board} 2>/dev/null && hermes kanban dispatch {task['id']} 2>&1")
+    # task['id']는 get_ready_tasks()의 정규식(t_[a-f0-9]+)으로 이미 형식
+    # 제한되어 있지만, board는 위와 동일한 이유로 shlex.quote() 적용.
+    out = run(f"hermes kanban boards switch {shlex.quote(board)} 2>/dev/null && hermes kanban dispatch {shlex.quote(task['id'])} 2>&1")
     success = "dispatched" in out.lower() or "claiming" in out.lower() or "running" in out.lower()
     return success, out.strip()[:100]
 

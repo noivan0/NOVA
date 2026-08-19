@@ -193,10 +193,17 @@ def _search_brain_db(topic: str, max_chars: int = 1200) -> str:
             pass
 
         # FTS 결과 빈약 시 page_chunks LIKE 폴백
+        # SECURITY-016 (2026-08-18, deep audit round 5): same class of
+        # bug as SECURITY-015 (nova_agent_worker.py) -- `keywords` is
+        # derived from `topic`, which originates from CLI
+        # `--context topic=...` (attacker-controlled). f-string-built
+        # LIKE clauses crashed on a single apostrophe (e.g. "don't").
+        # Fixed with parameterized placeholders.
         if len(rows) < 2:
-            kw_cond = " OR ".join(f"content LIKE '%{k}%'" for k in keywords)
+            kw_cond = " OR ".join("content LIKE ?" for _ in keywords)
             chunk_rows = conn.execute(
-                f"SELECT section, content FROM page_chunks WHERE {kw_cond} LIMIT 6"
+                f"SELECT section, content FROM page_chunks WHERE {kw_cond} LIMIT 6",
+                [f"%{k}%" for k in keywords],
             ).fetchall()
             for section, content in chunk_rows:
                 rows.append((section or "KB", (content or "")[:200]))
@@ -204,14 +211,15 @@ def _search_brain_db(topic: str, max_chars: int = 1200) -> str:
         # ── 2단계: graph edge retrieval — BM25 top hits → connected nodes ─────
         edge_snippets = []
         try:
-            kw_path = " OR ".join(f"path LIKE '%{k}%'" for k in keywords)
+            kw_path = " OR ".join("path LIKE ?" for _ in keywords)
             seed_pages = conn.execute(
                 f"""SELECT id, path, title FROM pages
                     WHERE ({kw_path})
                       AND path NOT LIKE 'kb/agents/%'
                       AND path NOT LIKE 'kb/lessons/%'
                       AND path NOT LIKE 'kb/memory_archive/%'
-                    LIMIT 3"""
+                    LIMIT 3""",
+                [f"%{k}%" for k in keywords],
             ).fetchall()
             seed_ids = [r[0] for r in seed_pages]
             if seed_ids:

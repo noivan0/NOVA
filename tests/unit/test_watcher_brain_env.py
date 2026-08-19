@@ -30,16 +30,34 @@ from nova.watcher.brain import _apply_master_key_llm_defaults
 
 @pytest.fixture(autouse=True)
 def _clean_llm_env(monkeypatch):
-    """Ensure each test starts from a clean LLM-related env slate."""
-    for var in (
+    """Ensure each test starts AND ends from a clean LLM-related env slate.
+
+    Test-isolation fix (2026-08-18, deep audit round 5 -- discovered via
+    `git stash` bisection while investigating an unrelated test_config.py
+    failure that turned out to be pre-existing, not caused by that
+    round's changes). `_apply_master_key_llm_defaults()` calls
+    `os.environ.setdefault(...)` directly rather than going through
+    `monkeypatch.setenv()`, so pytest-monkeypatch's automatic teardown
+    (which only reverts changes made THROUGH monkeypatch) never reverts
+    these writes. Once any test in this file ran, `NOVA_LLM_PROVIDER`
+    permanently leaked into the rest of the pytest process's environment
+    for every subsequent test file in the same run -- confirmed this
+    broke tests/unit/test_config.py's default-provider assertions when
+    run in the same session after this file. Explicitly deleting the
+    known vars again on teardown (not just setup) closes the leak.
+    """
+    known_vars = (
         "NOVA_LLM_PROVIDER", "NOVA_LLM_MODEL", "NOVA_LLM_BASE_URL",
         "NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY",
         "NOVA_CODEX_API_KEY", "NOVA_IMAGE_GEN_API_KEY",
         "HERMES_MASTER_APIKEY",
-    ):
+    )
+    for var in known_vars:
         monkeypatch.delenv(var, raising=False)
     yield
+    for var in known_vars:
+        os.environ.pop(var, None)
 
 
 def test_falls_back_to_echo_when_no_base_url_configured():

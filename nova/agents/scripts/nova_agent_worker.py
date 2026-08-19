@@ -86,6 +86,21 @@ def _inject_api_key() -> None:
     except Exception:
         pass
 
+# NOTE (2026-08-18, Codex-audited round 5): this module-top-level call
+# means merely IMPORTING this file (not just running it as a script)
+# mutates process-wide os.environ as a side effect -- a design smell.
+# In normal operation this is harmless today: the only real caller
+# launches this file as a standalone `python nova_agent_worker.py`
+# subprocess (see nova_orchestrator.py's WORKER_PY), never imports it as
+# a library, so the side effect only ever applies to that dedicated
+# process's own environment. It bit test isolation instead (importlib
+# loading this module in a test fixture leaked NOVA_LLM_PROVIDER into
+# the rest of the pytest process — fixed in
+# tests/unit/test_agent_worker_sql_injection.py by snapshotting/
+# restoring the affected env vars around the import). Left as-is rather
+# than refactored into a lazy call, since doing so would risk changing
+# runtime behavior of the one path this whole legacy nova/agents/ tree
+# is designed around; flagging here for any future import-based reuse.
 _inject_api_key()
 
 
@@ -135,7 +150,25 @@ def read_shared_context(topic: str, agent: str = "") -> str:
 
 
 def _read_context_fallback(topic: str) -> str:
-    """nova_shared_kb 실패 시 기본 KB + MEMORY 읽기"""
+    """nova_shared_kb 실패 시 기본 KB + MEMORY 읽기.
+
+    SECURITY-015 (2026-08-18, deep audit round 5): the LIKE conditions
+    used raw f-string interpolation of user-controlled keywords
+    (`f"content LIKE '%{k}%'"`), building the WHOLE WHERE clause as a
+    single f-string. `topic` originates from `context.get("topic", ...)`
+    -- i.e. CLI `--context topic=...`, the same attacker-controlled input
+    class that caused SECURITY-003 (shell injection). Reproduced: a
+    completely ordinary English word containing an apostrophe (e.g.
+    "don't") crashes the query with a syntax error. Note (Codex-reviewed
+    round 5): the crash is silently swallowed by the surrounding
+    `except Exception: pass` here, so the practical impact is a silent
+    KB-context lookup failure (degraded results), not a process crash or
+    denial of service -- but it's still a real bug: completely ordinary
+    user text should never break a query. Fixed by using parameterized
+    placeholders (`?`) instead of string-formatting the keyword values
+    into the SQL text; the LIKE wildcards ('%') are still applied but as
+    part of the bound parameter value, never as SQL syntax.
+    """
     parts = []
     try:
         uri  = f"file:{BRAIN_DB}?mode=ro"
@@ -143,9 +176,11 @@ def _read_context_fallback(topic: str) -> str:
         conn.execute("PRAGMA query_only=ON")
         kws  = [w.lower() for w in topic.split() if len(w) > 2][:4]
         if kws:
-            cond = " OR ".join(f"content LIKE '%{k}%'" for k in kws)
+            cond = " OR ".join("content LIKE ?" for _ in kws)
+            params = [f"%{k}%" for k in kws]
             rows = conn.execute(
-                f"SELECT section, content FROM page_chunks WHERE {cond} LIMIT 5"
+                f"SELECT section, content FROM page_chunks WHERE {cond} LIMIT 5",
+                params,
             ).fetchall()
             if rows:
                 parts.append("=== KB ===\n" + "\n".join(
