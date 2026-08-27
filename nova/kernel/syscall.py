@@ -445,14 +445,31 @@ class KernelAPI:
 
         Returns
         -------
-        str
-            run_id (UUID4)
+        RunHandle
+            run_id(UUID4)를 담은 실행 핸들
         """
         run_id = str(uuid.uuid4())
         now = self._now()
 
         with self._write_lock:
             with self._connect() as conn:
+                # nova_events가 없는 신규/테스트 DB에서도 spawn()이 동작하도록
+                # 최소 스키마를 보장한다 (실제 운영 DB는 이미 더 풍부한 스키마를
+                # 가질 수 있으므로 CREATE TABLE IF NOT EXISTS로 충돌 없이 안전).
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS nova_events (
+                        id            TEXT PRIMARY KEY,
+                        event_type    TEXT,
+                        severity      TEXT,
+                        title         TEXT,
+                        detail        TEXT,
+                        source_agent  TEXT,
+                        is_read       INTEGER DEFAULT 0,
+                        created_at    TEXT
+                    )
+                    """
+                )
                 # nova_events 실제 스키마: id, event_type, severity, title, detail, source, created_at, is_read, source_agent
                 conn.execute(
                     """

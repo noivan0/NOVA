@@ -6,7 +6,7 @@ NOVA runs 24/7 without timers. It watches its own memory (SQLite DB), detects ch
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.0-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-orange)](CHANGELOG.md)
 
 ---
 
@@ -263,6 +263,8 @@ sudo systemctl status nova-watcher
 | `HERMES_API_KEY` | — | LLM API key |
 | `HERMES_BASE_URL` | `https://api.openai.com/v1` | LLM endpoint |
 | `HERMES_MODEL` | `gpt-4o` | Default model |
+| `NOVA_LLM_PROVIDER` | `openai` | `openai` \| `anthropic` \| `ollama` \| `custom` \| `groq` \| `deepseek` \| `mistral` \| `xai` \| `moonshot` \| `zhipu` \| `openrouter` \| `together` \| `fireworks` \| `perplexity` \| `echo` — see [Providers](docs/guides/providers.md) |
+| `NOVA_LLM_FALLBACK_CHAIN` | — | Optional multi-provider fallback chain, e.g. `openai:gpt-4o,groq:llama-3.3-70b-versatile` |
 | `TELEGRAM_BOT_TOKEN` | — | Optional: Telegram notifications |
 | `OPENAI_API_KEY` | — | Optional: Codex gate |
 

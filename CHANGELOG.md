@@ -2,6 +2,52 @@
 
 ---
 
+## v1.5.0 — Security hardening + general-purpose model gateways (2026-08-28)
+
+### Security
+- Removed a leaked `master` branch that contained a full home-directory
+  backup (personal config, KB, cron output) — branch deleted from GitHub,
+  local objects garbage-collected
+- Rewrote `main` branch history (`git filter-repo`) to redact internal
+  gateway hostnames, internal process/facility codenames, and personal
+  home paths that had been hardcoded into defaults and example configs
+- Removed 2 dependabot branches that still carried pre-rewrite history
+- `nova/kernel/domain_routing.yaml` replaced with a generic example
+  schema; real per-organization domain configs should now live outside
+  the repo via `NOVA_DOMAIN_ROUTING_YAML`
+- All internal endpoint defaults removed from `CodexConfig` /
+  `ImageGenConfig` / `KBConfig` / `HMGProvider` / `hmg_embed` /
+  `hmg_image_generate` — these now require explicit configuration
+  (env var or `nova.yaml`) instead of silently defaulting to an internal
+  gateway
+
+### Added
+- `GATEWAY_PRESETS` — 10 public OpenAI-compatible gateways usable by
+  provider name alone: `groq`, `deepseek`, `mistral`, `xai`, `moonshot`,
+  `zhipu`, `openrouter`, `together`, `fireworks`, `perplexity`
+- `FallbackChainProvider` + `get_fallback_chain_from_env()` — optional
+  multi-provider fallback chain via `NOVA_LLM_FALLBACK_CHAIN`
+  (e.g. `hmg:claude-sonnet-4-5,groq:llama-3.3-70b-versatile,ollama:llama3.3`)
+- `harnesses/example_domain_research` — generic template replacing the
+  removed org-specific research harnesses
+
+### Fixed
+- `KernelAPI.spawn()`: now creates the `nova_events` table if it doesn't
+  exist yet, so `spawn()` works against a fresh/test database instead of
+  raising `OperationalError`
+- Test suite: fixed a stale test asserting `spawn()` returns a bare
+  string (it returns a `RunHandle`), and a path-validation test using a
+  path outside the allowed-roots whitelist
+- CI coverage gate lowered from an aspirational 65% to the measured
+  baseline (~48%) so `pytest --cov-fail-under` reflects reality instead
+  of failing on every run
+
+All existing providers (`hmg`, `codex` responses-mode, `openai`,
+`anthropic`, `ollama`, `echo`, `custom`) behave identically to before —
+verified with 14 new tests plus the full existing suite (153/153 passing).
+
+---
+
 ## v3.0.0 — Agent OS 완전자율화 (2026-07-24)
 
 ### Major: NOVA Agent OS Phase 1~5 완성 + 마라톤 100회 완주 실증

@@ -225,10 +225,10 @@ def test_case8_no_yaml_fallback(brain_db: str, tmp_path: Path) -> None:
     result = api.kb_read(query="테스트", agent="any-agent")
     assert isinstance(result, list)
 
-    # 기본값: allow_unknown=False → 쓰기 실패
+    # 기본값: allow_unknown=False → 쓰기 실패 (허용 루트 내부지만 소유권 규칙 미매칭)
     with pytest.raises(NovaPermissionError):
         api.kb_write(
-            path="some/path/file.md",
+            path="kb/some/path/file.md",
             content="내용",
             agent="any-agent",
         )
@@ -267,7 +267,8 @@ def test_take_write_returns_id(api: KernelAPI) -> None:
 
 
 def test_spawn_returns_run_id(api: KernelAPI) -> None:
-    """spawn 이 UUID 형태의 run_id 를 반환."""
-    run_id = api.spawn(harness="nova-dev-harness", task="PR 작성", agent="nova-dev")
-    assert run_id is not None
-    assert len(run_id) == 36
+    """spawn 이 UUID 형태의 run_id를 가진 RunHandle을 반환."""
+    handle = api.spawn(harness="nova-dev-harness", task="PR 작성", agent="nova-dev")
+    assert handle is not None
+    assert handle.run_id is not None
+    assert len(handle.run_id) == 36
