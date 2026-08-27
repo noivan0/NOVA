@@ -18,7 +18,7 @@ import os, sys, json, time, uuid, subprocess, logging, tempfile
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent
-HERMES_HOME = Path.home() / ".hermes"
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 # 환경변수 우선 → 헤르 메인/헤르2 양쪽에서 동작
 # 헤르 메인: /root/.hermes/ipc/{main_to_sub,sub_to_main}
 # 헤르2:     /workspace/ipc/{main_to_sub,sub_to_main}
@@ -197,6 +197,57 @@ def _get_project_criteria(project: str) -> str:
     if any(k in p for k in ["unlearning"]):
         return PROJECT_CRITERIA["unlearning"]
     return "소프트웨어 품질: 코드 완성도, 보안(OWASP Top 10), 성능, 에러 처리, 테스트 커버리지"
+
+
+# ─────────────────────────────────────────────────────────
+# Deterministic-First 게이트 (2026-08-28 추가)
+# ─────────────────────────────────────────────────────────
+#
+# oh-my-hermes의 evidence-boundary 원칙("판정 전에 결정론적으로 확인 가능한
+# 것부터 확인하라")을 참고해 LLM 호출 전에 무료·즉시·결정론적으로 확인
+# 가능한 항목부터 검사한다. 여기서 하드 FAIL이 나오면 Claude/GPT 호출 자체를
+# 생략해 비용/지연을 아끼고, "LLM이 낙관적으로 승인해버리는" 리스크도 원천
+# 차단한다. 기존 "빈 콘텐츠 → ABORT"(P3 fix)를 이 게이트의 첫 항목으로 흡수.
+#
+# 반환: (passed: bool, reasons: list[str])
+#   passed=False면 run_gate()가 즉시 ABORT를 반환하고 LLM 호출을 생략한다.
+
+_MIN_CONTENT_LEN = 20
+_FORBIDDEN_PLACEHOLDER_MARKERS = (
+    "TODO", "FIXME", "lorem ipsum", "{{placeholder}}", "[INSERT CONTENT HERE]",
+)
+
+
+def deterministic_checks(project: str, content: str, mode: str = "review") -> tuple[bool, list[str]]:
+    """LLM 호출 전 결정론적 사전검증.
+
+    실패 사유가 하나라도 있으면 (False, reasons)를 반환한다.
+    이 함수는 순수 함수(외부 API 호출 없음)이므로 항상 즉시·무료로 실행된다.
+    """
+    reasons: list[str] = []
+
+    stripped = (content or "").strip()
+    if not stripped:
+        reasons.append("empty_content")
+        # 빈 콘텐츠면 다른 검사는 의미가 없으므로 바로 반환
+        return False, reasons
+
+    if len(stripped) < _MIN_CONTENT_LEN:
+        reasons.append(f"content_too_short(<{_MIN_CONTENT_LEN} chars)")
+
+    lowered = stripped.lower()
+    hit_markers = [m for m in _FORBIDDEN_PLACEHOLDER_MARKERS if m.lower() in lowered]
+    if hit_markers:
+        reasons.append(f"placeholder_markers_found:{','.join(hit_markers)}")
+
+    # HTML 태그만 있고 실텍스트가 거의 없는 경우 (빈 템플릿 발행 방지)
+    import re as _re
+    text_only = _re.sub(r"<[^>]+>", " ", stripped)
+    text_only = _re.sub(r"\s+", " ", text_only).strip()
+    if len(text_only) < _MIN_CONTENT_LEN:
+        reasons.append("no_real_text_after_html_strip")
+
+    return (len(reasons) == 0), reasons
 
 
 # ─────────────────────────────────────────────────────────
@@ -668,15 +719,19 @@ def run_gate(project: str, content: str, mode: str = "review", use_ipc: bool = T
     start = time.time()
     logger.info(f"[{project}] NOVA Phase 5 공동검증 시작 (mode={mode})")
 
-    # P3 fix: 빈 콘텐츠는 ABORT 반환 — 품질 게이트 우회 방지
-    if not content or not content.strip():
-        logger.warning(f"[{project}] 빈 콘텐츠 — 발행 차단 (ABORT)")
+    # Deterministic-First 게이트: LLM 호출 전 결정론적 사전검증.
+    # 여기서 실패하면 Claude/GPT 호출 자체를 생략하고 즉시 ABORT — 빈 콘텐츠뿐
+    # 아니라 플레이스홀더/HTML-only 콘텐츠 등도 함께 걸러낸다 (기존 P3 fix 확장).
+    det_passed, det_reasons = deterministic_checks(project, content, mode)
+    if not det_passed:
+        logger.warning(f"[{project}] Deterministic 게이트 실패 ({det_reasons}) — 발행 차단 (ABORT)")
         return {
             "verdict": "ABORT",
             "score": 0,
-            "claude": {"status": "skipped", "reason": "empty_content"},
-            "codex": {"status": "skipped", "reason": "empty_content"},
-            "final_source": "empty_content_abort",
+            "claude": {"status": "skipped", "reason": "deterministic_gate_failed"},
+            "codex": {"status": "skipped", "reason": "deterministic_gate_failed"},
+            "final_source": "deterministic_gate_abort",
+            "deterministic_reasons": det_reasons,
             "elapsed": 0.0,
             "project": project,
             "mode": mode,

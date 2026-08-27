@@ -6,7 +6,7 @@ NOVA runs 24/7 without timers. It watches its own memory (SQLite DB), detects ch
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.5.0-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.0-orange)](CHANGELOG.md)
 
 ---
 

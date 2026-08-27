@@ -27,7 +27,7 @@ import os, sys, json, time, uuid, concurrent.futures, logging
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent
-HERMES_HOME = Path.home() / ".hermes"
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 IPC_OUT = Path("/workspace/ipc/sub_to_main")
 IPC_IN  = Path("/workspace/ipc/main_to_sub")
 LOG_DIR = HERMES_HOME / "logs"
@@ -96,6 +96,46 @@ def _get_project_criteria(project: str) -> str:
             return val
     # 기본값: 범용 소프트웨어 품질 기준
     return f"{project} 기준: 코드 정확성·보안 취약점 없음·사용자 가치·완전성 (Boil the Lake)"
+
+
+# ─────────────────────────────────────────────────────────
+# Deterministic-First 게이트 (2026-08-28 추가)
+# ─────────────────────────────────────────────────────────
+#
+# nova/agents/scripts/nova_codex_gate.py와 동일한 사전검증 로직.
+# LLM 호출 전에 무료·즉시·결정론적으로 확인 가능한 항목부터 검사해
+# 하드 FAIL 시 Claude/GPT 호출을 생략한다.
+
+_MIN_CONTENT_LEN = 20
+_FORBIDDEN_PLACEHOLDER_MARKERS = (
+    "TODO", "FIXME", "lorem ipsum", "{{placeholder}}", "[INSERT CONTENT HERE]",
+)
+
+
+def deterministic_checks(project: str, content: str, mode: str = "review") -> tuple:
+    """LLM 호출 전 결정론적 사전검증. (passed: bool, reasons: list[str]) 반환."""
+    reasons = []
+
+    stripped = (content or "").strip()
+    if not stripped:
+        reasons.append("empty_content")
+        return False, reasons
+
+    if len(stripped) < _MIN_CONTENT_LEN:
+        reasons.append(f"content_too_short(<{_MIN_CONTENT_LEN} chars)")
+
+    lowered = stripped.lower()
+    hit_markers = [m for m in _FORBIDDEN_PLACEHOLDER_MARKERS if m.lower() in lowered]
+    if hit_markers:
+        reasons.append(f"placeholder_markers_found:{','.join(hit_markers)}")
+
+    import re as _re
+    text_only = _re.sub(r"<[^>]+>", " ", stripped)
+    text_only = _re.sub(r"\s+", " ", text_only).strip()
+    if len(text_only) < _MIN_CONTENT_LEN:
+        reasons.append("no_real_text_after_html_strip")
+
+    return (len(reasons) == 0), reasons
 
 
 # ─────────────────────────────────────────────────────────
@@ -506,6 +546,20 @@ def run_gate(project: str, content: str, mode: str = "review", use_ipc: bool = T
     """
     start = time.time()
     logger.info(f"[{project}] NOVA gate v2 시작 (mode={mode}, use_ipc={use_ipc})")
+
+    # Deterministic-First 게이트: LLM 병렬호출 전 결정론적 사전검증.
+    det_passed, det_reasons = deterministic_checks(project, content, mode)
+    if not det_passed:
+        logger.warning(f"[{project}] Deterministic 게이트 실패 ({det_reasons}) — 발행 차단 (ABORT)")
+        return {
+            "verdict": "ABORT",
+            "final_score": 0,
+            "claude": {"status": "skipped", "reason": "deterministic_gate_failed"},
+            "gpt": {"status": "skipped", "reason": "deterministic_gate_failed"},
+            "merge_source": "deterministic_gate_abort",
+            "deterministic_reasons": det_reasons,
+            "elapsed": 0.0,
+        }
 
     # 병렬 실행: Claude L1 + GPT L2 동시
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:

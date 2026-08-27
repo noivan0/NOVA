@@ -84,3 +84,7 @@ defaults:
   fallback_harness: research        # default harness when no domain matches
   fallback_cooldown_min: 20         # default cooldown (minutes) for the fallback
   fallback_min_takes: 20            # min accumulated takes to trigger SYNTHESIZE fallback
+  interrupt_budget: 1               # max interrupts actually dispatched per tick
+                                     # (classify_with_budget()) — the rest are
+                                     # recorded as "excluded" with an explicit
+                                     # reason instead of silently dropped

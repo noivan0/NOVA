@@ -80,6 +80,33 @@ class Interrupt:
     tier:       str = "warm"   # Phase 3: "hot"|"warm"|"cold" 메모리 계층 힌트
 
 
+@dataclasses.dataclass
+class BudgetedClassification:
+    """classify_with_budget()의 반환 구조 — 예산 내 투영 + 명시적 배제.
+
+    oh-my-hermes의 "요청별 필요한 만큼만 예산 내에서 투영하고, 나머지는
+    사유와 함께 명시적으로 배제한다" 원칙을 참고한 설계 (2026-08-28 도입).
+    기존 classify()는 발견된 인터럽트를 전부 반환하고 호출자가 [0]번만
+    골라 쓰는 암묵적 관례였는데, 이 방식은 "왜 나머지가 실행되지 않았는지"가
+    로그에 남지 않는다. classify_with_budget()은 그 이유를 구조화된 형태로
+    보존한다.
+
+    Attributes
+    ----------
+    selected:
+        예산 한도 내에서 실행 대상으로 선정된 인터럽트 (priority/confidence
+        순으로 정렬된 상위 N개).
+    excluded:
+        예산 초과로 배제된 인터럽트들. 각 항목은
+        ``{"kind", "domain", "confidence", "harness", "reason"}`` 딕셔너리.
+    budget:
+        이번 호출에 적용된 예산 값 (선정 가능한 최대 개수).
+    """
+    selected: list[Interrupt]
+    excluded: list[dict[str, Any]]
+    budget:   int
+
+
 # ── InterruptRouter 클래스 ────────────────────────────────────────────────────
 
 class InterruptRouter:
@@ -253,6 +280,63 @@ class InterruptRouter:
                 deduped.append(intr)
 
         return sorted(deduped, key=lambda x: (x.priority, -x.confidence))
+
+    # ── classify_with_budget() ───────────────────────────────────────────────
+
+    def classify_with_budget(
+        self,
+        takes: list[dict],
+        window: int = 50,
+        tier: str = "warm",
+        budget: int | None = None,
+    ) -> BudgetedClassification:
+        """classify()에 예산 투영 + 명시적 배제를 추가한 버전.
+
+        classify()가 반환하는 우선순위 정렬 목록에서, 예산(``budget``) 개수만큼만
+        ``selected``로 승격하고 나머지는 ``excluded``에 사유와 함께 담는다.
+
+        Parameters
+        ----------
+        takes, window, tier:
+            classify()와 동일.
+        budget:
+            이번 틱에 실행 가능한 최대 인터럽트 개수. None이면
+            domain_routing.yaml의 ``defaults.interrupt_budget`` 값을 쓰고,
+            그마저 없으면 1(기존 동작과 동일 — 호출자가 [0]번만 쓰던 관례).
+
+        Returns
+        -------
+        BudgetedClassification
+        """
+        all_interrupts = self.classify(takes, window=window, tier=tier)
+
+        if budget is None:
+            budget = int(self._defaults.get("interrupt_budget", 1))
+        budget = max(0, budget)
+
+        selected = all_interrupts[:budget]
+        excluded: list[dict[str, Any]] = []
+        for intr in all_interrupts[budget:]:
+            excluded.append({
+                "kind": intr.kind.value,
+                "domain": intr.domain,
+                "confidence": intr.confidence,
+                "harness": intr.harness,
+                "reason": (
+                    f"budget_exceeded: {len(selected)}/{budget} 슬롯 이미 "
+                    f"우선순위 {selected[0].priority if selected else '?'}번대 "
+                    "인터럽트로 채워짐 — 다음 틱으로 이월"
+                ),
+            })
+
+        if excluded:
+            logger.info(
+                "[interrupt] budget=%d 선정=%d 배제=%d — 배제 사유: %s",
+                budget, len(selected), len(excluded),
+                [(e["kind"], e["domain"]) for e in excluded],
+            )
+
+        return BudgetedClassification(selected=selected, excluded=excluded, budget=budget)
 
     # ── route() ──────────────────────────────────────────────────────────────
 

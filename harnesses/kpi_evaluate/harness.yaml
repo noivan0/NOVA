@@ -1,14 +1,20 @@
 name: kpi_evaluate
-description: "nova-evaluator — brain_health KPI 평가. DoD: KPI_PASS 또는 KPI_FAIL 출력"
-version: "1.0.0"
+description: "nova-evaluator — brain_health KPI 평가. Deterministic-First 게이트 + 3-Judge 패널(Planner/Critic/Architect) 합의. DoD: KPI_PASS 또는 KPI_FAIL 출력"
+version: "1.1.0"
 judge_model: "claude-sonnet-4-6"
 judge_version: "2026-08-10"
 panel_judges:
   - model: "claude-sonnet-4-6"
     provider: anthropic
+    role: "planner"
     version: "2026-08-10"
   - model: "gpt-5.4"
     provider: codex
+    role: "critic"
+    version: "2026-08-10"
+  - model: "claude-sonnet-4-6"
+    provider: anthropic
+    role: "architect"
     version: "2026-08-10"
 pattern: pipeline
 
@@ -126,8 +132,21 @@ phases:
     judge_model: "gpt-5.4"
     judge_version: "2026-08-10"
 
+  - id: evaluate_kpi_architect
+    name: "KPI 패널 Judge (3번째 — Architect 역할, 반대의견 탐색)"
+    executor: llm
+    input_files:
+      - kpi_raw.json
+    prompt_file: evaluate_architect.txt
+    output_file: kpi_report_architect.md
+    timeout: 60
+    on_failure: skip
+    provider: anthropic
+    judge_model: "claude-sonnet-4-6"
+    judge_version: "2026-08-10"
+
   - id: panel_verdict
-    name: "패널 Judge 합의 판정 (3/4 합의 원칙)"
+    name: "패널 Judge 합의 판정 (Deterministic-First + 3-Judge 합의)"
     executor: python
     on_failure: skip
     timeout: 20
@@ -137,9 +156,28 @@ phases:
       from pathlib import Path
       nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova')))
       ws = nova_home / 'workspace' / 'kpi_evaluate'
+
+      # ── Deterministic-First: LLM 판정보다 먼저, 하드 게이트로 적용 ──
+      # deterministic_gate가 FAIL이면 LLM judge 투표 결과와 무관하게
+      # 즉시 KPI_FAIL 확정. "판정 근거 없이 LLM이 낙관적으로 통과시키는"
+      # 사례를 원천 차단한다 (oh-my-hermes evidence-boundary 원칙 참고,
+      # 2026-08-28 gap 해소).
+      det = {}
+      det_path = ws / 'deterministic_check.json'
+      if det_path.exists():
+          try:
+              det = json.loads(det_path.read_text(errors='replace'))
+          except Exception:
+              det = {}
+      deterministic_pass = det.get('deterministic_pass', False)
+
       votes = []
       reasons = []
-      for fname, judge in [('kpi_report_claude.md','claude'), ('kpi_report_codex.md','codex')]:
+      for fname, judge in [
+          ('kpi_report_claude.md', 'claude'),
+          ('kpi_report_codex.md', 'codex'),
+          ('kpi_report_architect.md', 'architect'),
+      ]:
           fpath = ws / fname
           if fpath.exists():
               text = fpath.read_text(errors='replace')
@@ -150,16 +188,35 @@ phases:
               reasons.append({'judge': judge, 'snippet': text[:200]})
       pass_votes = sum(1 for v, _ in votes if v == 'PASS')
       total_votes = len(votes)
-      # 2 judges: 2/2 unanimous = PASS, 1/2 or 0/2 = FAIL
-      # 원문: "3/4 합의" 원칙 적용 — 2 judge 시 만장일치만 PASS
-      panel_pass = (pass_votes == total_votes and total_votes > 0)
+
+      if not deterministic_pass:
+          # Deterministic 게이트 실패 — LLM 투표와 무관하게 FAIL 확정
+          panel_pass = False
+          gate_reason = 'deterministic_gate_failed'
+      elif total_votes == 0:
+          panel_pass = False
+          gate_reason = 'no_judge_votes'
+      else:
+          # 3 judges: 3/4 합의 원칙 근사 — 2/3 이상 PASS면 통과
+          # (기존 2-judge 만장일치 원칙에서 확장: judge 수가 늘어난 만큼
+          # 단일 judge 편향에 덜 흔들리도록 과반+1 기준 적용)
+          panel_pass = pass_votes >= 2 and (pass_votes / total_votes) >= 0.66
+          gate_reason = 'llm_panel_vote'
+
       verdict = {
+          'deterministic_pass': deterministic_pass,
+          'deterministic_checks': det,
           'panel_pass': panel_pass,
+          'gate_reason': gate_reason,
           'pass_votes': pass_votes,
           'total_votes': total_votes,
           'votes': [{'verdict': v, 'judge': j} for v, j in votes],
           'reasons': reasons,
-          'judge_models': ['claude-sonnet-4-6@2026-08-10', 'gpt-5.4@2026-08-10'],
+          'judge_models': [
+              'claude-sonnet-4-6@2026-08-10',
+              'gpt-5.4@2026-08-10',
+              'claude-sonnet-4-6-architect@2026-08-10',
+          ],
       }
       output = json.dumps(verdict, ensure_ascii=False, indent=2)
 
@@ -209,18 +266,22 @@ phases:
       if vf.exists():
           verdict = _j.loads(vf.read_text(errors='replace'))
       panel_pass = verdict.get('panel_pass', False)
+      deterministic_pass = verdict.get('deterministic_pass', False)
+      gate_reason = verdict.get('gate_reason', 'unknown')
       pass_v = verdict.get('pass_votes', 0)
       total_v = verdict.get('total_votes', 0)
       # fallback: kpi_report_claude.md
       src = ''
-      for fn in ['kpi_report_claude.md', 'kpi_report_codex.md']:
+      for fn in ['kpi_report_claude.md', 'kpi_report_codex.md', 'kpi_report_architect.md']:
           fp = ws / fn
           if fp.exists():
               src += fp.read_text(errors='replace')[:600] + '\n'
       kw = 'KPI_PASS' if panel_pass else 'KPI_FAIL'
       output = (kw + '\n'
+          + f'DETERMINISTIC_GATE={"PASS" if deterministic_pass else "FAIL"}\n'
+          + f'GATE_REASON={gate_reason}\n'
           + f'PANEL_VERDICT={kw} ({pass_v}/{total_v} judges agree)\n'
-          + f'JUDGES=claude-sonnet-4-6@2026-08-10,gpt-5.4@2026-08-10\n'
+          + f'JUDGES=claude-sonnet-4-6@2026-08-10,gpt-5.4@2026-08-10,claude-sonnet-4-6-architect@2026-08-10\n'
           + 'DoD complete\n\n' + src[:1200])
 
 runbook:

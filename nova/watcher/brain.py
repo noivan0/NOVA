@@ -551,7 +551,16 @@ def _react(
             _recent_takes = _layer.get_takes(tier="hot",  limit=20)
             _warm_takes   = _layer.get_takes(tier="warm", limit=30)
             _router       = InterruptRouter()  # domain_routing.yaml 자동 로드
-            _interrupts   = _router.classify(_warm_takes + _recent_takes)  # warm(old) + hot(new)
+            _budgeted     = _router.classify_with_budget(_warm_takes + _recent_takes)
+            _interrupts   = _budgeted.selected  # warm(old) + hot(new), 예산 내 선정분만
+
+            if _budgeted.excluded:
+                _log(
+                    f"  interrupt budget: {len(_budgeted.selected)}/{_budgeted.budget} 선정, "
+                    f"{len(_budgeted.excluded)}개 배제 — "
+                    + ", ".join(f"{e['kind']}/{e['domain']}({e['reason'].split(':')[0]})" for e in _budgeted.excluded),
+                    log_file,
+                )
 
             if _interrupts:
                 _intr       = _interrupts[0]  # 최우선 1개
