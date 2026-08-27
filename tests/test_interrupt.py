@@ -14,16 +14,18 @@ test_interrupt.py — InterruptRouter 단위 테스트 (Phase 2)
 import sys
 import os
 import time
+from pathlib import Path
 
-# nova 패키지 경로 추가
-sys.path.insert(0, str(__import__("pathlib").Path.home() / "nova"))
+# nova 패키지 경로 추가 (repo 상대경로 기준 — Path.home()에 의존하지 않음.
+# CI 러너의 홈 디렉토리(/home/runner)는 로컬 개발 홈과 다르므로 절대경로
+# 가정은 CI에서 항상 깨진다)
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
 
 from nova.kernel.interrupt import InterruptKind, InterruptRouter
 
 
-ROUTING_YAML = str(
-    __import__("pathlib").Path.home() / "nova" / "nova" / "kernel" / "domain_routing.yaml"
-)
+ROUTING_YAML = str(_REPO_ROOT / "nova" / "kernel" / "domain_routing.yaml")
 
 
 def make_takes(claims: list[str], kind: str = "fact", holder: str = "hermes") -> list[dict]:
