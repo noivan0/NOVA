@@ -4,7 +4,7 @@ nova_kb_harvest.py — harness workspace report.md → KB projects/nova-harness-
 brain_watcher harness 실행 후 호출. nova_kb_full_sync.sh 에서도 실행.
 
 흐름:
-  /home/user/.nova/workspace/{harness}/report.md  →  brain.db pages 인덱싱
+  $NOVA_HOME/workspace/{harness}/report.md  →  brain.db pages 인덱싱
   최신 20개 harness report 요약  →  KB/projects/nova-harness-log.md 갱신
 """
 import sqlite3, os, hashlib
@@ -90,8 +90,6 @@ for h in HARNESS_NAMES:
     lines.append(f"- 내용 요약: {preview}\n")
 
 lines.append("\n---\n")
-lines.append(f"- [[projects/toollist-face-check]] — [REDACTED_PROJECT2]+[REDACTED_PROJECT] 공구매핑 점검\n")
-lines.append(f"- [[projects/ct_monitor_server]] — CT 모니터링 서버\n")
 
 out_path = KB / LOG_KEY
 out_path.parent.mkdir(parents=True, exist_ok=True)

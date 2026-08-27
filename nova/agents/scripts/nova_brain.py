@@ -57,16 +57,20 @@ def _get_api_key() -> str:
 
 
 def get_embedding(text: str) -> Optional[list]:
-    """HMG 임베딩 엔드포인트 호출"""
+    """임베딩 엔드포인트 호출 (NOVA_EMBEDDING_BASE_URL 환경변수 필요)"""
     api_key = _get_api_key()
     if not api_key:
         return None
-    url = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments/text-embedding-3-large/embeddings"
+    embed_base_url = os.environ.get("NOVA_EMBEDDING_BASE_URL", "").rstrip("/")
+    embed_model = os.environ.get("NOVA_EMBEDDING_MODEL", "text-embedding-3-large")
+    if not embed_base_url:
+        return None
+    url = f"{embed_base_url}/{embed_model}/embeddings"
     try:
         resp = requests.post(
             url,
             headers={"api-key": api_key, "Content-Type": "application/json"},
-            json={"input": text[:8000], "model": "text-embedding-3-large"},
+            json={"input": text[:8000], "model": embed_model},
             timeout=30,
             verify=False
         )

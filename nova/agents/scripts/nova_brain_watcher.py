@@ -138,7 +138,7 @@ def snap_kb():
             hermes_home / "kb",
             # wiki/는 스캔 제외: kb_sync가 wiki 재인덱싱 시 mtime 변경 → 순환 감지 방지
             # hermes_home / "wiki",
-            hermes_home / "doosi" / "kb",
+            hermes_home / "shortform-video" / "kb",
         ]
         md_files = []
         for root in scan_roots:

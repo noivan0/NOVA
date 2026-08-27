@@ -88,11 +88,22 @@ class InterruptRouter:
     Parameters
     ----------
     routing_yaml:
-        domain_routing.yaml 경로.  None이면 같은 디렉토리의 기본 파일 사용.
+        domain_routing.yaml 경로. None이면 다음 순서로 결정한다:
+          1) NOVA_DOMAIN_ROUTING_YAML 환경변수 (조직별 실제 설정을 레포 밖
+             또는 git-ignored 로컬 파일로 분리할 때 사용)
+          2) 같은 디렉토리의 기본(예시) domain_routing.yaml
+        조직/프로젝트 전용 실제 키워드(사내 코드명, 공정명 등)는 레포에
+        커밋하지 말고 NOVA_DOMAIN_ROUTING_YAML로 로컬 파일을 가리키는
+        방식을 권장한다.
     """
 
     def __init__(self, routing_yaml: str | None = None) -> None:
-        _yaml_path = Path(routing_yaml) if routing_yaml else _DEFAULT_ROUTING_YAML
+        import os
+        _yaml_path = Path(
+            routing_yaml
+            or os.environ.get("NOVA_DOMAIN_ROUTING_YAML")
+            or _DEFAULT_ROUTING_YAML
+        )
         self._config: dict[str, Any] = self._load_yaml(_yaml_path)
         self._domains: dict[str, dict] = self._config.get("domains", {})
         self._defaults: dict[str, Any] = self._config.get("defaults", {})

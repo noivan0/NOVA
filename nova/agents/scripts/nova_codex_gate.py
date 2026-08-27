@@ -2,7 +2,7 @@
 """
 nova_codex_gate.py — NOVA v1.0 Phase 5: Claude Code + Codex 공동검증 게이트
 ==========================================================================
-모든 NOVA 프로젝트(blog-pipeline, doosi, unlearning)의 콘텐츠/코드 검증에 사용.
+모든 NOVA 프로젝트(blog-pipeline, shortform-video, unlearning)의 콘텐츠/코드 검증에 사용.
 
 워크플로우:
   1. Claude Code   — 콘텐츠 구현/생성 (anthropic messages API)
@@ -12,7 +12,7 @@ nova_codex_gate.py — NOVA v1.0 Phase 5: Claude Code + Codex 공동검증 게�
 
 사용법:
   python3 nova_codex_gate.py --project blog-pipeline --content "..." --mode review
-  python3 nova_codex_gate.py --project doosi --content-file /tmp/content.md --mode full
+  python3 nova_codex_gate.py --project shortform-video --content-file /tmp/content.md --mode full
 """
 import os, sys, json, time, uuid, subprocess, logging, tempfile
 from pathlib import Path
@@ -52,18 +52,17 @@ if _env_file.exists():
             _env_tmp[_k] = _v
             os.environ.setdefault(_k, _v)
 
-# Claude API 설정
-CLAUDE_BASE = os.environ.get("CLAUDE_BASE_URL", "https://internal-llm-gateway.example.com/claude-code/v2")
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+# Claude API 설정 — 사내/전용 게이트웨이 URL은 환경변수로 지정(기본값 없음)
+CLAUDE_BASE = os.environ.get("CLAUDE_BASE_URL", "")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
 ANTHROPIC_VERSION = os.environ.get("ANTHROPIC_API_VERSION", "2023-06-01")
 API_KEY = os.environ.get("HERMES_API_KEY", "")
 
 # ─────────────────────────────────────────────────────────
-# [v2.0 업그레이드] GPT-5.4 L2 독립 감사 설정 (2026-05-25)
-# bin/nova_codex_gate.py v2.0에서 병합
+# L2 독립 감사(2차 감사 모델) 설정 — 환경변수로 지정
 # ─────────────────────────────────────────────────────────
-GPT_BASE  = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments/gpt-5.4"
-GPT_MODEL = "gpt-5.4"
+GPT_BASE  = os.environ.get("GPT_AUDIT_BASE_URL", "")
+GPT_MODEL = os.environ.get("GPT_AUDIT_MODEL", "gpt-4o")
 GPT_KEY   = os.environ.get("GPT_AUDIT_KEY") or os.environ.get("HERMES_API_KEY", "")
 NOVA_BRAIN_DB = HERMES_HOME / "nova_brain.db"
 
@@ -174,7 +173,7 @@ def _review_error(reviewer: str, reason: str, verdict: str = "ABORT", status: st
 # ─────────────────────────────────────────────
 PROJECT_CRITERIA = {
     "blog-pipeline":    "블로그 기준: 실용 정보(교통/숙박/관광지/팁 2개 이상), SEO 자연 키워드, 2000자 이상",
-    "doosi":            "숏폼 콘텐츠: 공감성, 트렌드 반영, 첫 문장 임팩트, 루프 유발 구조",
+    "shortform-video":            "숏폼 콘텐츠: 공감성, 트렌드 반영, 첫 문장 임팩트, 루프 유발 구조",
     "saju-wellness":    "사주 앱: 만세력 정확도, AI 해석 품질, 법적 면책, 개인정보 처리",
     "mental-load":      "멘탈헬스: 위기감지, 14세 연령제한, SOS 번호, 전문가 연결",
     "caring-ansimcall": "케어 앱: IVR 흐름, Twilio HMAC, 가족동의 2단계, SSRF 방어",
@@ -193,8 +192,8 @@ def _get_project_criteria(project: str) -> str:
         return PROJECT_CRITERIA["mental-load"]
     if any(k in p for k in ["caring", "senior", "care", "ansim"]):
         return PROJECT_CRITERIA["caring-ansimcall"]
-    if any(k in p for k in ["doosi", "shorts"]):
-        return PROJECT_CRITERIA["doosi"]
+    if any(k in p for k in ["shortform-video", "shorts"]):
+        return PROJECT_CRITERIA["shortform-video"]
     if any(k in p for k in ["unlearning"]):
         return PROJECT_CRITERIA["unlearning"]
     return "소프트웨어 품질: 코드 완성도, 보안(OWASP Top 10), 성능, 에러 처리, 테스트 커버리지"
@@ -268,6 +267,8 @@ def gpt_audit(project: str, content: str, claude_result: dict) -> dict:
 
     if not GPT_KEY:
         return _gpt_fallback(claude_result, "GPT_KEY not set")
+    if not GPT_BASE:
+        return _gpt_fallback(claude_result, "GPT_AUDIT_BASE_URL not set")
 
     endpoint = f"{GPT_BASE}/chat/completions"
     criteria = _get_project_criteria(project)
@@ -403,6 +404,8 @@ JSON 형식으로만 답변하세요."""
         "anthropic-version": ANTHROPIC_VERSION
     }
 
+    if not CLAUDE_BASE:
+        return {"status": "error", "reason": "CLAUDE_BASE_URL not set", "reviewer": "claude-layer1", "verdict": "REQUEST_CHANGES", "score": 50}
     endpoint = CLAUDE_BASE.rstrip("/") + "/v1/messages"
     try:
         resp = requests.post(
@@ -502,6 +505,8 @@ Claude의 1차 검토와 독립적으로, 외부 심사위원 관점에서 콘�
         "x-api-key": api_key,
         "anthropic-version": ANTHROPIC_VERSION
     }
+    if not CLAUDE_BASE:
+        return {"verdict": "REQUEST_CHANGES", "score_adjustment": 0, "additional_issues": [], "final_recommendation": "CLAUDE_BASE_URL not set", "reviewer": "independent-auditor"}
     endpoint = CLAUDE_BASE.rstrip("/") + "/v1/messages"
 
     try:
@@ -870,7 +875,7 @@ def _record_gate_result(project: str, result: dict):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="NOVA Phase 5 공동검증 게이트")
-    parser.add_argument("--project", required=True, help="프로젝트명 (blog-pipeline, doosi, unlearning)")
+    parser.add_argument("--project", required=True, help="프로젝트명 (blog-pipeline, shortform-video, unlearning)")
     parser.add_argument("--content", help="검증할 콘텐츠 (직접 입력)")
     parser.add_argument("--content-file", help="검증할 콘텐츠 파일 경로")
     parser.add_argument("--mode", default="review", choices=["review", "full", "quick"], help="검증 모드")

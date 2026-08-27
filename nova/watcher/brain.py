@@ -303,9 +303,8 @@ def _run_harness_bg(harness_name: str, log_file: Path | None,
                         _hcfg = _yaml.safe_load(_hcfg_path.read_text()) or {}
                         _master_key = _hcfg.get("model", {}).get("api_key", "")
                 if _master_key:
-                    os.environ.setdefault("NOVA_LLM_PROVIDER", "hmg")
-                    os.environ.setdefault("NOVA_LLM_BASE_URL", "https://internal-llm-gateway.example.com/claude-code/v2")
-                    os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-4-6")
+                    os.environ.setdefault("NOVA_LLM_PROVIDER", "anthropic")
+                    os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-4-5")
                     # setdefault 대신 강제 덮어쓰기: 셸에서 구키가 export된 채로
                     # watcher를 시작해도 .env/.config.yaml의 최신 키가 항상 우선함
                     for _var in ("NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
@@ -414,6 +413,8 @@ REACT = {
     "memory_check_min_s":   7200,   # 2 h (30 min → 2 h: 과잉 slim 순환 방지)
     "memory_slim_threshold":  90,   # % — 90%(1980자) 이상일 때만 slim (85 → 90: slim 과열 방지)
     "memory_limit_chars":   2_200,  # BUG-W2b: Hermes 실제 한계 2200자와 일치
+    "user_slim_threshold":    90,   # % — USER.md도 MEMORY.md와 동일 기준으로 감시 (2026-08-12 추가)
+    "user_limit_chars":     1_375,  # Hermes config.yaml memory.user_char_limit과 일치
 }
 
 
@@ -428,6 +429,7 @@ def _react(
     resource_updater: Path | None,
     memory_md: Path | None,
     log_file: Path | None,
+    user_md: Path | None = None,
 ) -> list[str]:
     """Decide and execute reactions based on what changed."""
     R = REACT
@@ -677,6 +679,22 @@ def _react(
                 # 엔진 없을 때 경고 로그 (허위 acted 기록 방지)
                 _log(f"  WARN: memory_slim 엔진 없음 — 메모리 {snap['pct']}% 위험, engines/ 확인 필요", log_file)
 
+    # USER.md check (2026-08-12: MEMORY.md만 감시하고 USER.md는 누락되어
+    # 사용자 프로필이 무한정 98%까지 방치되던 결함 수정. 동일 memory_slim
+    # 엔진을 --target user로 호출 — MEMORY.md와 완전히 독립된 별도 쿨다운.)
+    if user_md and _can_act(state, "user_check", R["memory_check_min_s"]):
+        user_snap = _snap_memory(user_md, R["user_limit_chars"])
+        state["last_user_check"] = time.time()
+        state["user_pct"] = user_snap["pct"]
+        if user_snap["pct"] >= R["user_slim_threshold"]:
+            _log(f"  USER {user_snap['pct']}% ≥ {R['user_slim_threshold']}% → memory_slim(user)", log_file)
+            if "memory_slim" in engines:
+                _run_bg(engines["memory_slim"] + ["--target", "user"], "memory_slim_user", log_file, timeout=60)
+                state["last_user_slim"] = time.time()
+                acted.append(f"user_slim_{user_snap['pct']}pct")
+            else:
+                _log(f"  WARN: memory_slim 엔진 없음 — USER {user_snap['pct']}% 위험, engines/ 확인 필요", log_file)
+
     return acted
 
 
@@ -738,6 +756,10 @@ def run(
     memory_md = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "memories" / "MEMORY.md"
     # BUG-E3 수정: 에이전트들이 읽는 MEMORY.md와 동일한 경로 사용
     # (기존: nova_home/"memory.md" → slim 트리거 불일치)
+    user_md = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "memories" / "USER.md"
+    # 2026-08-12: USER.md(사용자 프로필)도 MEMORY.md와 동일하게 감시.
+    # 이전까지 watcher가 MEMORY.md만 스냅샷/트리거해 USER.md는 무한정
+    # 방치되어 98%까지 쌓이는 결함이 있었음.
 
     (nova_home / "logs").mkdir(parents=True, exist_ok=True)
 
@@ -867,6 +889,7 @@ def run(
                     state, active_engines, wiki_synth, resource_updater,
                     memory_md if memory_md.exists() else None,
                     log_file,
+                    user_md if user_md.exists() else None,
                 )
                 if acted:
                     _log(f"  reacted: {acted}", log_file)

@@ -330,18 +330,31 @@ class EchoProvider(LLMProvider):
 
 
 class HMGProvider(LLMProvider):
-    """Direct httpx provider for HMG Anthropic-compatible endpoint."""
+    """Direct httpx provider for a generic Anthropic Messages-API-compatible
+    enterprise/custom gateway.
+
+    base_url has no default — it must be supplied via cfg.base_url
+    (NOVA_LLM_BASE_URL / provider-specific base_url in nova.yaml). This
+    provider name ("hmg") is kept for backward compatibility with existing
+    deployments; new custom-gateway users should generally prefer the
+    "custom" provider (OpenAI-compatible) or add a new preset in
+    GATEWAY_PRESETS if it follows the OpenAI schema instead.
+    """
 
     _MAX_KEY_RETRIES = 3
 
     def __init__(self, cfg) -> None:
         import httpx
+        if not cfg.base_url:
+            raise ValueError(
+                "HMGProvider requires base_url to be set "
+                "(NOVA_LLM_BASE_URL env var or llm.base_url in nova.yaml)"
+            )
         # CRITICAL-4 FIX: _KeyRotator 통합 — 429/401 시 keys.json round-robin 순환
         self._rotator = _KeyRotator(cfg.api_key or "")
         self._key = self._rotator.current()
-        raw = cfg.base_url or "https://internal-llm-gateway.example.com/claude-code/v2"
-        self._base = raw.rstrip("/").removesuffix("/v1")
-        self.model = cfg.model or "claude-sonnet-4-6"
+        self._base = cfg.base_url.rstrip("/").removesuffix("/v1")
+        self.model = cfg.model or "claude-sonnet-4-5"
         self.max_tokens = getattr(cfg, "max_tokens", 4096)
         self.temperature = getattr(cfg, "temperature", 0.7)
         self._client = httpx.Client(timeout=getattr(cfg, "timeout", 120) or 120)
@@ -479,6 +492,21 @@ def get_llm_provider(cfg: LLMConfig) -> LLMProvider:
     #  cross-family judge 합의가 사실상 무력화된 것을 실증 확인 → 근본 수정)
     if p == "codex" and cfg.base_url and "/responses" in cfg.base_url:
         return CodexResponsesProvider(cfg)
+    if p in GATEWAY_PRESETS:
+        # 2026-08-28: 범용 OpenAI 호환 게이트웨이 프리셋 — base_url을 몰라도
+        # provider 이름만으로 즉시 사용 가능 (기존 hmg/codex_responses/openai/
+        # anthropic/ollama/echo 동작에는 영향 없음, 신규 provider 이름만 추가)
+        preset = GATEWAY_PRESETS[p]
+        resolved_cfg = LLMConfig(
+            provider="openai",
+            model=cfg.model,
+            api_key=cfg.api_key,
+            base_url=cfg.base_url or preset["base_url"],
+            max_tokens=cfg.max_tokens,
+            temperature=cfg.temperature,
+            timeout=cfg.timeout,
+        )
+        return OpenAIProvider(resolved_cfg)
     if p in ("openai", "custom", "codex"):
         return OpenAIProvider(cfg)
     elif p == "anthropic":
@@ -490,15 +518,132 @@ def get_llm_provider(cfg: LLMConfig) -> LLMProvider:
     else:
         raise ValueError(
             f"Unknown LLM provider: '{cfg.provider}'. "
-            f"Valid options: openai, anthropic, ollama, custom, codex, echo"
+            f"Valid options: openai, anthropic, ollama, custom, codex, echo, "
+            f"{', '.join(sorted(GATEWAY_PRESETS))}"
         )
 
 
-# ── HMG 사내 헬퍼 ─────────────────────────────────────────────────────────────
+# ── 범용 OpenAI 호환 게이트웨이 프리셋 (2026-08-28 추가) ─────────────────────────
+#
+# 기존 hmg/codex_responses/openai/anthropic/ollama/echo provider는 전혀
+# 변경하지 않는다. 여기 등록된 이름을 NOVA_LLM_PROVIDER에 지정하면 base_url을
+# 몰라도 바로 사용 가능해지는 "별칭"일 뿐이며, 내부적으로는 OpenAIProvider를
+# 재사용한다(OpenAI Chat Completions 호환 스펙을 따르는 게이트웨이 전제).
+# NOVA_LLM_BASE_URL을 명시적으로 지정하면 프리셋 값보다 우선한다.
+GATEWAY_PRESETS: dict[str, dict[str, str]] = {
+    "groq":       {"base_url": "https://api.groq.com/openai/v1",
+                   "note": "Groq — LPU 초고속 추론 (Llama/Mixtral/Gemma 등)"},
+    "deepseek":   {"base_url": "https://api.deepseek.com/v1",
+                   "note": "DeepSeek 공식 API"},
+    "mistral":    {"base_url": "https://api.mistral.ai/v1",
+                   "note": "Mistral AI 공식 API"},
+    "xai":        {"base_url": "https://api.x.ai/v1",
+                   "note": "xAI Grok 공식 API"},
+    "moonshot":   {"base_url": "https://api.moonshot.cn/v1",
+                   "note": "Moonshot Kimi 공식 API"},
+    "zhipu":      {"base_url": "https://open.bigmodel.cn/api/paas/v4",
+                   "note": "Zhipu GLM 공식 API"},
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1",
+                   "note": "OpenRouter — 수백 개 모델 단일 게이트웨이"},
+    "together":   {"base_url": "https://api.together.xyz/v1",
+                   "note": "Together AI — 오픈모델 호스팅"},
+    "fireworks":  {"base_url": "https://api.fireworks.ai/inference/v1",
+                   "note": "Fireworks AI — 오픈모델 호스팅"},
+    "perplexity": {"base_url": "https://api.perplexity.ai",
+                   "note": "Perplexity — 웹검색 결합 모델"},
+    "azure_openai_gateway": {"base_url": "",
+                   "note": "Azure OpenAI — base_url 필수 지정 (프리셋 없음, 별칭만 등록)"},
+}
 
-def hmg_embed(text: str, *, api_key: str,
-              base_url: str = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments",
-              model: str = "text-embedding-3-large") -> "Optional[list[float]]":
+
+# ── Fallback Chain (2026-08-28 추가) ─────────────────────────────────────────
+#
+# 여러 provider/model을 우선순위 체인으로 등록해두고, 앞 provider가 실패
+# (예외 발생)하면 자동으로 다음 provider로 넘어간다. oh-my-hermes의
+# mixture-of-models 카테고리 체인 개념을 참고했으나, NOVA는 브랜드/카테고리
+# 대신 순수 provider+model 페어 리스트로 단순화했다.
+#
+# 기존 단일 provider 사용 흐름(get_llm_provider)에는 전혀 영향 없음 — 이 클래스는
+# 명시적으로 생성해서 쓸 때만 관여한다.
+
+class FallbackChainProvider(LLMProvider):
+    """여러 LLMConfig를 순서대로 시도하는 래퍼. 전부 실패하면 마지막 예외를 올린다."""
+
+    def __init__(self, configs: list[LLMConfig]):
+        if not configs:
+            raise ValueError("FallbackChainProvider requires at least one LLMConfig")
+        self._configs = configs
+
+    def complete(self, prompt: str, system: str = "", timeout: int = 120) -> str:
+        last_exc: Exception | None = None
+        for i, cfg in enumerate(self._configs):
+            try:
+                provider = get_llm_provider(cfg)
+                return provider.complete(prompt, system=system, timeout=timeout)
+            except Exception as e:
+                last_exc = e
+                logger.warning(
+                    "[nova/fallback_chain] provider %d/%d (%s/%s) 실패: %s — 다음으로 폴백",
+                    i + 1, len(self._configs), cfg.provider, cfg.model, e,
+                )
+                continue
+        raise RuntimeError(f"FallbackChainProvider: 모든 provider 실패 ({len(self._configs)}개 시도)") from last_exc
+
+    def chat(self, messages: list, timeout: int = 120) -> str:
+        last_exc: Exception | None = None
+        for i, cfg in enumerate(self._configs):
+            try:
+                provider = get_llm_provider(cfg)
+                return provider.chat(messages, timeout=timeout)
+            except Exception as e:
+                last_exc = e
+                logger.warning(
+                    "[nova/fallback_chain] provider %d/%d (%s/%s) 실패: %s — 다음으로 폴백",
+                    i + 1, len(self._configs), cfg.provider, cfg.model, e,
+                )
+                continue
+        raise RuntimeError(f"FallbackChainProvider: 모든 provider 실패 ({len(self._configs)}개 시도)") from last_exc
+
+
+def get_fallback_chain_from_env() -> "FallbackChainProvider | None":
+    """NOVA_LLM_FALLBACK_CHAIN 환경변수에서 폴백 체인을 구성한다.
+
+    형식: "provider1:model1,provider2:model2,..."
+    예:    NOVA_LLM_FALLBACK_CHAIN="hmg:claude-sonnet-4-6,groq:llama-3.3-70b-versatile,ollama:llama3.3"
+
+    각 provider별 api_key/base_url은 기존 NOVA_LLM_API_KEY / provider별 개별
+    환경변수(NOVA_<PROVIDER>_API_KEY 등은 미지원 — 현재는 단일 마스터 키
+    NOVA_LLM_API_KEY를 모든 체인 항목에 공용으로 사용)를 그대로 재사용한다.
+    설정 안 되어 있으면 None 반환 — 기존 단일 provider 흐름은 완전히 그대로 유지된다.
+    """
+    import os
+    raw = os.environ.get("NOVA_LLM_FALLBACK_CHAIN", "").strip()
+    if not raw:
+        return None
+    api_key = os.environ.get("NOVA_LLM_API_KEY", "")
+    configs: list[LLMConfig] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item or ":" not in item:
+            continue
+        provider, model = item.split(":", 1)
+        configs.append(LLMConfig(provider=provider.strip(), model=model.strip(), api_key=api_key))
+    if not configs:
+        return None
+    return FallbackChainProvider(configs)
+
+
+# ── Enterprise/custom gateway helpers ────────────────────────────────────────
+#
+# These standalone helpers (hmg_embed, hmg_image_generate) target an
+# OpenAI-compatible enterprise embeddings/images gateway. base_url has no
+# default here — callers must supply their own gateway URL. `verify_ssl`
+# defaults to True; set it to False only for gateways behind a
+# self-signed/internal CA (matches common enterprise proxy setups).
+
+def hmg_embed(text: str, *, api_key: str, base_url: str,
+              model: str = "text-embedding-3-large",
+              verify_ssl: bool = True) -> "Optional[list[float]]":
     try:
         import requests
         from typing import Optional  # noqa: F401
@@ -508,7 +653,7 @@ def hmg_embed(text: str, *, api_key: str,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"input": text[:8000], "model": model},
             timeout=15,
-            verify=False,
+            verify=verify_ssl,
         )
         if r.status_code == 200:
             return r.json()["data"][0]["embedding"]
@@ -517,39 +662,58 @@ def hmg_embed(text: str, *, api_key: str,
         return None
 
 
-def hmg_image_generate(prompt: str, *, api_key: str,
-                        base_url: str = "https://internal-api-gateway.example.com/hchat-in/api/v3/models",
-                        model: str = "gemini-3.1-flash-image-preview",
-                        fallback_model: str = "gemini-3-pro-image-preview") -> "Optional[str]":
+def hmg_image_generate(prompt: str, *, api_key: str, base_url: str,
+                        model: str = "gpt-image-1",
+                        fallback_model: str = "",
+                        fallback_base_url: str = "",
+                        verify_ssl: bool = True) -> "Optional[str]":
+    """OpenAI-compatible enterprise gateway 경유 이미지 생성.
+
+    메인 모델은 OpenAI Images API 형식(POST {base_url}, {model, prompt, size, n}
+    → data[0].b64_json)을 쓰고, fallback_model/fallback_base_url이 지정되면
+    실패 시 Gemini generateContent 형식(POST {fallback_base_url}/{model}:generateContent)
+    으로 폴백한다. 두 API는 요청/응답 스키마가 다르므로 각각 별도 처리한다.
+    base_url/fallback_base_url 모두 기본값이 없다 — 호출자가 반드시 지정해야 한다.
+    """
     try:
         import requests
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
-        }
 
-        def _call(m: str) -> "Optional[requests.Response]":
-            url = f"{base_url.rstrip('/')}/{m}:generateContent"
+        # 1) 메인 모델 (OpenAI Images API 형식)
+        try:
+            resp = requests.post(
+                base_url,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": model, "prompt": prompt, "size": "1024x1024", "n": 1},
+                timeout=120,
+                verify=verify_ssl,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("data") or []
+                if items and "b64_json" in items[0]:
+                    return items[0]["b64_json"]
+        except Exception:
+            pass
+
+        # 2) 폴백: Gemini generateContent 형식
+        if fallback_model and fallback_base_url:
+            payload = {
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+            }
+            url = f"{fallback_base_url.rstrip('/')}/{fallback_model}:generateContent"
             r = requests.post(
                 url,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
                 timeout=60,
-                verify=False,
+                verify=verify_ssl,
             )
-            return r if r.status_code == 200 else None
-
-        # 메인 모델 시도
-        resp = _call(model)
-        # 실패 시 fallback 모델 시도
-        if resp is None and fallback_model and fallback_model != model:
-            resp = _call(fallback_model)
-
-        if resp is not None:
-            data = resp.json()
-            for part in data.get("candidates", [{}])[0].get("content", {}).get("parts", []):
-                if "inlineData" in part:
-                    return part["inlineData"]["data"]
+            if r.status_code == 200:
+                data = r.json()
+                for part in data.get("candidates", [{}])[0].get("content", {}).get("parts", []):
+                    if "inlineData" in part:
+                        return part["inlineData"]["data"]
         return None
     except Exception:
         return None

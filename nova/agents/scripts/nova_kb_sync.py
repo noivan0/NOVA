@@ -18,7 +18,7 @@ KB_DIR = HERMES_DIR / 'kb' / 'projects'
 KB_LOG = HERMES_DIR / 'kb' / 'log.md'
 
 # [M-3 fix] 고정 목록 대신 동적 로드 — _projects_overrides.json + 기본 목록 병합
-_BASE_PROJECTS = ['blog-pipeline', 'doosi', 'unlearning']
+_BASE_PROJECTS = ['blog-pipeline', 'shortform-video', 'unlearning']
 
 def _load_all_projects() -> list:
     """기본 프로젝트 + _projects_overrides.json 동적 프로젝트 목록 반환"""

@@ -19,9 +19,9 @@ STAMP_FILE  = Path(NOVA_HOME) / "logs" / "kb_last_sync.stamp"
 ENV = {**os.environ,
        "NOVA_HOME":        NOVA_HOME,
        "HERMES_HOME":      HERMES_HOME,
-       "NOVA_LLM_PROVIDER":os.environ.get("NOVA_LLM_PROVIDER", "hmg"),
-       "NOVA_LLM_BASE_URL":os.environ.get("NOVA_LLM_BASE_URL", "https://internal-llm-gateway.example.com/claude-code/v2"),
-       "NOVA_LLM_MODEL":   os.environ.get("NOVA_LLM_MODEL", "claude-sonnet-5")}
+       "NOVA_LLM_PROVIDER":os.environ.get("NOVA_LLM_PROVIDER", "anthropic"),
+       "NOVA_LLM_BASE_URL":os.environ.get("NOVA_LLM_BASE_URL", ""),
+       "NOVA_LLM_MODEL":   os.environ.get("NOVA_LLM_MODEL", "claude-sonnet-4-5")}
 
 def kb_fingerprint():
     """KB 디렉토리의 파일 mtime 합산으로 변경 감지"""

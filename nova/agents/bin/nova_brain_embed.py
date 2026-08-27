@@ -159,8 +159,13 @@ def sync_new_embeddings():
             continue
 
         try:
+            embed_base_url = os.environ.get("NOVA_EMBEDDING_BASE_URL", "").rstrip("/")
+            embed_model = os.environ.get("NOVA_EMBEDDING_MODEL", "text-embedding-3-large")
+            if not embed_base_url:
+                print("[nova_brain_embed] NOVA_EMBEDDING_BASE_URL 미설정 — 임베딩 스킵", file=sys.stderr)
+                continue
             resp = requests.post(
-                "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments/text-embedding-3-large/embeddings",
+                f"{embed_base_url}/{embed_model}/embeddings",
                 headers={"api-key": key, "Content-Type": "application/json"},
                 json={"input": content[:8000], "model": "text-embedding-3-large"},
                 timeout=30, verify=False

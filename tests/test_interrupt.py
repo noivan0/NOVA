@@ -3,7 +3,7 @@ test_interrupt.py — InterruptRouter 단위 테스트 (Phase 2)
 ==========================================================
 
 테스트 항목:
-  1. MMS 키워드 takes → DOMAIN_RESEARCH(mms) 반환
+  1. 도메인 키워드 takes → DOMAIN_RESEARCH(example_ops_monitoring) 반환
   2. BUG 키워드 takes → SELF_HEAL 반환
   3. takes 미달 → 인터럽트 없음 (폴백 미발동)
   4. takes 20개 이상 (도메인 미매칭) → SYNTHESIZE 폴백
@@ -31,22 +31,22 @@ def make_takes(claims: list[str], kind: str = "fact", holder: str = "hermes") ->
     return [{"kind": kind, "claim": c, "holder": holder, "recorded_at": "2026-07-16T00:00:00"} for c in claims]
 
 
-def test_mms_domain_research():
-    """MMS 키워드 takes → DOMAIN_RESEARCH(mms) 반환 확인."""
+def test_domain_research():
+    """도메인 키워드 takes → DOMAIN_RESEARCH(example_ops_monitoring) 반환 확인."""
     router = InterruptRouter(ROUTING_YAML)
     takes = make_takes([
-        "[REDACTED_ENGINE_CODE] [REDACTED_ENGINE] 엔진 CT 분석 결과 OP11 사이클타임 이상",
-        "MMS CNC 데이터에서 T15 가공 오류 감지",
-        "OP14 세타 블록라인 공정 이상 감지",
+        "cycle time anomaly detected on equipment line",
+        "throughput dashboard shows downtime spike",
+        "monitoring alert threshold exceeded on process anomaly",
     ])
     interrupts = router.classify(takes)
     assert interrupts, "인터럽트가 반환되어야 함"
     kinds = [i.kind for i in interrupts]
     domains = [i.domain for i in interrupts]
     assert InterruptKind.DOMAIN_RESEARCH in kinds, f"DOMAIN_RESEARCH 없음 — {kinds}"
-    mms_idx = kinds.index(InterruptKind.DOMAIN_RESEARCH)
-    assert domains[mms_idx] == "mms", f"도메인이 'mms'여야 함 — {domains[mms_idx]}"
-    print(f"  ✅ MMS DOMAIN_RESEARCH: confidence={interrupts[mms_idx].confidence:.2f}, harness={interrupts[mms_idx].harness}")
+    idx = kinds.index(InterruptKind.DOMAIN_RESEARCH)
+    assert domains[idx] == "example_ops_monitoring", f"도메인이 'example_ops_monitoring'이어야 함 — {domains[idx]}"
+    print(f"  ✅ DOMAIN_RESEARCH: confidence={interrupts[idx].confidence:.2f}, harness={interrupts[idx].harness}")
 
 
 def test_self_heal():
@@ -71,13 +71,13 @@ def test_no_interrupt_below_threshold():
     """키워드 1개로 min_matches 미달 → DOMAIN_RESEARCH 미발동 확인."""
     router = InterruptRouter(ROUTING_YAML)
     takes = make_takes([
-        "[REDACTED_ENGINE] 관련 일반 대화",  # MMS 키워드 1개뿐
+        "cycle time",  # 도메인 키워드 1개뿐 (min_matches=2 미달)
     ])
     interrupts = router.classify(takes)
     domain_researches = [i for i in interrupts if i.kind == InterruptKind.DOMAIN_RESEARCH]
-    mms_hits = [i for i in domain_researches if i.domain == "mms"]
-    assert not mms_hits, f"min_matches 미달인데 MMS 인터럽트 발동됨: {mms_hits}"
-    print(f"  ✅ min_matches 미달 — MMS 인터럽트 없음 (전체 인터럽트: {[i.kind.value for i in interrupts]})")
+    hits = [i for i in domain_researches if i.domain == "example_ops_monitoring"]
+    assert not hits, f"min_matches 미달인데 인터럽트 발동됨: {hits}"
+    print(f"  ✅ min_matches 미달 — 도메인 인터럽트 없음 (전체 인터럽트: {[i.kind.value for i in interrupts]})")
 
 
 def test_synthesize_fallback():
@@ -105,9 +105,9 @@ def test_should_trigger_cooldown():
 
     intr = Interrupt(
         kind=InterruptKind.DOMAIN_RESEARCH,
-        domain="mms",
+        domain="example_ops_monitoring",
         confidence=0.8,
-        evidence=["[REDACTED_ENGINE] OP11 이상"],
+        evidence=["cycle time anomaly"],
         harness="research",
         priority=2,
     )
@@ -125,21 +125,21 @@ def test_should_trigger_cooldown():
 
 
 def test_route_returns_correct_harness():
-    """route() — mms 도메인 → 설정된 harness 반환."""
+    """route() — example_ops_monitoring 도메인 → 설정된 harness 반환."""
     router = InterruptRouter(ROUTING_YAML)
     from nova.kernel.interrupt import Interrupt, InterruptKind
 
     intr = Interrupt(
         kind=InterruptKind.DOMAIN_RESEARCH,
-        domain="mms",
+        domain="example_ops_monitoring",
         confidence=0.7,
-        evidence=["[REDACTED_ENGINE_CODE] [REDACTED_ENGINE]"],
+        evidence=["cycle time anomaly"],
         harness="research",
         priority=2,
     )
     harness = router.route(intr)
     assert harness == "research", f"harness가 'research'여야 함 — {harness}"
-    print(f"  ✅ route(mms) → '{harness}'")
+    print(f"  ✅ route(example_ops_monitoring) → '{harness}'")
 
 
 def test_fallback_without_yaml():
@@ -160,7 +160,7 @@ def test_fallback_without_yaml():
 
 if __name__ == "__main__":
     tests = [
-        ("MMS DOMAIN_RESEARCH",           test_mms_domain_research),
+        ("DOMAIN_RESEARCH",                test_domain_research),
         ("BUG → SELF_HEAL",               test_self_heal),
         ("min_matches 미달 → 인터럽트 없음",   test_no_interrupt_below_threshold),
         ("SYNTHESIZE 폴백 (20개 이상)",       test_synthesize_fallback),

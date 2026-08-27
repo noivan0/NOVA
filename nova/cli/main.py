@@ -562,11 +562,11 @@ def _cmd_watcher(args) -> None:
         else:
             log = pid_dir / "brain_watcher.log"
             import os as _os
-            _watcher_env = {**_os.environ,
-                "NOVA_LLM_PROVIDER": "hmg",
-                "NOVA_LLM_BASE_URL": "https://internal-llm-gateway.example.com/claude-code/v2",
-                "NOVA_LLM_MODEL": "claude-sonnet-4-6",
-            }
+            _watcher_env = {**_os.environ}
+            _watcher_env.setdefault("NOVA_LLM_PROVIDER", _os.environ.get("NOVA_LLM_PROVIDER", "anthropic"))
+            if _os.environ.get("NOVA_LLM_BASE_URL"):
+                _watcher_env["NOVA_LLM_BASE_URL"] = _os.environ["NOVA_LLM_BASE_URL"]
+            _watcher_env.setdefault("NOVA_LLM_MODEL", _os.environ.get("NOVA_LLM_MODEL", "claude-sonnet-4-5"))
             proc = subprocess.Popen(
                 [sys.executable, "-m", "nova.watcher.brain", "--nova-home", nova_home_str],
                 stdout=open(log, "a"), stderr=subprocess.STDOUT,

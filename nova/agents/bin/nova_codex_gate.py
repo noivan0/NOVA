@@ -52,16 +52,15 @@ if _env_file.exists():
             os.environ.setdefault(_k.strip(), _v.strip())
 
 # Claude API 설정
-CLAUDE_BASE  = os.environ.get("CLAUDE_BASE_URL", "https://internal-llm-gateway.example.com/claude-code/v2")
+CLAUDE_BASE  = os.environ.get("CLAUDE_BASE_URL", "")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 API_KEY      = os.environ.get("HERMES_API_KEY", "")
 
-# GPT-5.4 API 설정 (헤르2 실증: HMG internal-apigw, max_completion_tokens 필수)
-# 헤르2 발견 (2026-05-24): 헤르 HERMES_API_KEY = Claude 전용, GPT 401
-# GPT-5.4 API 설정 (헤르2 실증: HMG internal-apigw, max_completion_tokens 필수)
-# GPT-5.4 API 설정 (헤르2 실증 2026-05-24: 정확한 엔드포인트 + max_completion_tokens 필수)
-GPT_BASE  = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/responses"
-GPT_MODEL = "gpt-5.6-terra"
+# 2차 감사 모델(GPT 계열) API 설정 — 사내/전용 게이트웨이 URL은 환경변수로 지정.
+# GPT_BASE가 비어있으면 해당 phase는 스킵된다(조용히 404로 실패하지 않도록
+# 명시적으로 건너뛴다).
+GPT_BASE  = os.environ.get("GPT_AUDIT_BASE_URL", "")
+GPT_MODEL = os.environ.get("GPT_AUDIT_MODEL", "gpt-4o")
 GPT_KEY   = os.environ.get("GPT_AUDIT_KEY") or os.environ.get("HERMES_API_KEY", "")
 
 NOVA_BRAIN_DB = HERMES_HOME / "nova_brain.db"
@@ -78,7 +77,7 @@ PROJECT_CRITERIA: dict[str, str] = {
     # 블로그 파이프라인
     "blog-pipeline":  "블로그 기준: 실용 정보 밀도·SEO 키워드 자연스러운 삽입·출처 정확성·타이틀 매력도·GEO필수(FAQ섹션 최소1개·질문형소제목 최소2개·구체적수치 최소3개) — GEO 미달 시 ABORT",
     "unlearning":     "언러닝 블로그 기준: 인사이트 깊이·독자 가치·AI 문체 회피·인간적 어조",
-    "doosi":          "[REDACTED_CHANNEL] 숏폼 기준: 반전 매력·루프 유발 요소·감정 훅·15초 내 핵심 전달",
+    "shortform-video": "숏폼 콘텐츠 기준: 반전 매력·루프 유발 요소·감정 훅·15초 내 핵심 전달",
     # KRAYT
     "krayt":          "KRAYT QA 기준: 취약점 재현 가능성·CVSS 정확도·PoC 코드 동작 여부·오탐 여부",
     # NOVA 에이전트
@@ -178,6 +177,8 @@ Output JSON only:
         "x-api-key": API_KEY,
         "anthropic-version": "2023-06-01"
     }
+    if not CLAUDE_BASE:
+        return {"status": "error", "reason": "CLAUDE_BASE_URL not set", "reviewer": "claude-layer1", "verdict": "REQUEST_CHANGES", "score": 50}
     endpoint = CLAUDE_BASE.rstrip("/") + "/v1/messages"
 
     t0 = time.time()
@@ -205,19 +206,19 @@ Output JSON only:
 # Layer 2: GPT-5.4 (HMG) — 진짜 독립 감사
 # ─────────────────────────────────────────────────────────
 def gpt_audit(project: str, content: str, claude_result: dict) -> dict:
-    """Layer 2: GPT-5.4로 독립 감사 (완전히 다른 모델 — 진짜 독립)
+    """Layer 2: 독립 감사 모델(GPT 계열)로 2차 감사 (완전히 다른 모델 — 진짜 독립)
 
-    헤르2 실증 (2026-05-24):
-    - endpoint: https://internal-api-gateway.example.com/hchat-in/api/v3/openai/responses
-    - model: gpt-5.6-terra
-    - max_completion_tokens 필수 (max_tokens 불가 → HTTP 400)
-    - 응답 시간: ~0.9s
+    endpoint/model은 GPT_AUDIT_BASE_URL / GPT_AUDIT_MODEL 환경변수로 지정한다.
+    사내/전용 게이트웨이가 max_completion_tokens 등 스키마 요구사항을 강제하는
+    경우가 있으니 게이트웨이 문서를 확인해 페이로드를 맞출 것.
     """
     try:
         import requests as _req
     except ImportError:
         return _gpt_fallback(claude_result, "requests not installed")
 
+    if not GPT_BASE:
+        return _gpt_fallback(claude_result, "GPT_AUDIT_BASE_URL not set")
     endpoint = f"{GPT_BASE}/chat/completions"
     # gstack 사고법: 독립 감사관 = "비판적 외부 시선"
     system_msg = f"""You are Layer-2 independent auditor for {project} (GPT-5.4 — adversarial perspective).
@@ -337,6 +338,8 @@ L1 요약 (참고만, 동의 금지):
         "messages": [{"role": "user", "content": content[:4000]}]
     }
     headers = {"content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"}
+    if not CLAUDE_BASE:
+        return {"score": 50, "verdict": "REQUEST_CHANGES", "reviewer": "claude-fallback", "reason": "CLAUDE_BASE_URL not set"}
     endpoint = CLAUDE_BASE.rstrip("/") + "/v1/messages"
 
     try:
@@ -573,7 +576,7 @@ def codex_audit(project: str, content: str, claude_result: dict) -> dict:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="NOVA Phase 5 공동검증 게이트")
-    parser.add_argument("--project", required=True, help="프로젝트명 (blog-pipeline, doosi, unlearning)")
+    parser.add_argument("--project", required=True, help="프로젝트명 (blog-pipeline, shortform-video, unlearning)")
     parser.add_argument("--content", help="검증할 콘텐츠 (직접 입력)")
     parser.add_argument("--content-file", help="검증할 콘텐츠 파일 경로")
     parser.add_argument("--mode", default="review", choices=["review", "full", "quick"], help="검증 모드")

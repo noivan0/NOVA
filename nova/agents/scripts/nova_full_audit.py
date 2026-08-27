@@ -273,9 +273,10 @@ if nova_yaml_path.exists():
     provider = llm.get("provider","")
     base_url  = llm.get("base_url","")
     model     = llm.get("model","")
-    chk("LLM설정", f"provider={provider}", provider in ("anthropic", "hmg"),
-        "반드시 anthropic")
-    chk("LLM설정", f"base_url", "internal-llm-gateway.example.com" in base_url, base_url)
+    chk("LLM설정", f"provider={provider}", provider in ("anthropic", "hmg", "openai", "custom"),
+        "지원 provider 중 하나여야 함")
+    expected_host = os.environ.get("NOVA_EXPECTED_LLM_HOST", "")
+    chk("LLM설정", f"base_url", (not expected_host) or (expected_host in base_url), base_url)
     chk("LLM설정", f"model={model}", "claude" in model.lower(), model)
     chk("LLM설정", "api_key env 주입", True,
         "NOVA_LLM_API_KEY / config.yaml에서 nova_bridge가 주입")

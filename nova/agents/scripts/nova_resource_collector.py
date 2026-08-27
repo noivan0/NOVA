@@ -33,8 +33,8 @@ KB_DIR       = HERMES_DIR / "kb"
 LOGS_DIR     = HERMES_DIR / "logs" / "nova"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Claude API
-CLAUDE_API_URL   = os.environ.get("CLAUDE_API_URL", "https://internal-llm-gateway.example.com/claude-code/v2/v1/messages")
+# Claude API — 사내/전용 게이트웨이 URL은 환경변수로 지정(기본값 없음)
+CLAUDE_API_URL   = os.environ.get("CLAUDE_API_URL", "")
 CLAUDE_API_MODEL = os.environ.get("CLAUDE_API_MODEL", "claude-sonnet-5")
 ANTHROPIC_VERSION = os.environ.get("ANTHROPIC_API_VERSION", "2023-06-01")
 SSL_VERIFY = os.environ.get("REQUESTS_CA_BUNDLE", None) or not bool(
@@ -129,9 +129,9 @@ DOMAIN_QUERIES = {
         ],
     },
 
-    # ── doosi 채널 ──
-    "doosi": {
-        "description": "[REDACTED_CHANNEL] 숏폼 콘텐츠 자동화",
+    # ── shortform-video 채널 (예시: 숏폼 콘텐츠 자동화) ──
+    "shortform-video": {
+        "description": "숏폼 콘텐츠 자동화",
         "domains": {
             "shorts_strategy": [
                 "YouTube Shorts algorithm 2025 strategy",
@@ -968,7 +968,7 @@ def cmd_cross():
 
     prompt = f"""당신은 NOVA 자율 운영 시스템의 전략 분석가입니다.
 
-아래는 각 프로젝트(blog-pipeline, doosi, unlearning, _nova_ops)의 최신 지식 요약입니다.
+아래는 각 프로젝트(blog-pipeline, shortform-video, unlearning, _nova_ops)의 최신 지식 요약입니다.
 
 {combined[:6000]}
 

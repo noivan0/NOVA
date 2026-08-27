@@ -56,7 +56,7 @@ SCAN_ROOTS = [
     (KB_ROOT / "config",               "config/",     "knowledge"),  # 설정 정보
     (KB_ROOT,                          "kb/",         None),         # 나머지 KB (폴백)
     (HERMES_HOME / "memories",         "memories/",   "memory"),     # BUG-W3: memories 추가
-    (HERMES_HOME / "doosi" / "kb",     "doosi/",      "project"),
+    (HERMES_HOME / "shortform-video" / "kb",     "shortform-video/",      "project"),
     (NOVA_HOME_PATH / "workspace",     "workspace/",  "harness"),    # harness 결과물
 ]
 

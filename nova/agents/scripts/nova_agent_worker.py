@@ -56,9 +56,8 @@ def _inject_api_key() -> None:
         if not key:
             key = _yaml.safe_load((HERMES_HOME / "config.yaml").read_text()).get("model", {}).get("api_key", "")
         if key:
-            os.environ.setdefault("NOVA_LLM_PROVIDER", "hmg")
-            os.environ.setdefault("NOVA_LLM_BASE_URL", "https://internal-llm-gateway.example.com/claude-code/v2")
-            os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-5")
+            os.environ.setdefault("NOVA_LLM_PROVIDER", "anthropic")
+            os.environ.setdefault("NOVA_LLM_MODEL", "claude-sonnet-4-5")
             for var in ("NOVA_LLM_API_KEY", "HMG_API_KEY", "ANTHROPIC_API_KEY",
                         "OPENAI_API_KEY", "NOVA_KB_EMBEDDING_API_KEY", "NOVA_CODEX_API_KEY",
                         "NOVA_IMAGE_GEN_API_KEY"):

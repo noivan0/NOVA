@@ -14,7 +14,7 @@ ENV = {**os.environ,
        "NOVA_HOME":   NOVA_HOME,
        "HERMES_HOME": HERMES_HOME,
        "NOVA_LLM_PROVIDER": os.environ.get("NOVA_LLM_PROVIDER", "hmg"),
-       "NOVA_LLM_BASE_URL": os.environ.get("NOVA_LLM_BASE_URL", "https://internal-llm-gateway.example.com/claude-code/v2"),
+       "NOVA_LLM_BASE_URL": os.environ.get("NOVA_LLM_BASE_URL", ""),
        "NOVA_LLM_MODEL": os.environ.get("NOVA_LLM_MODEL", "claude-sonnet-5")}
 
 steps = [

@@ -1,12 +1,16 @@
 """kb_pipeline.py — KB MD → brain.db pages 동기화
 
 수정 (2026-07-19): id 자동 생성(sha256) + ON CONFLICT upsert — NULL id 재발 영구 차단
+수정 (2026-08-28): 개인 홈 경로 하드코딩 제거 — NOVA_HOME/HERMES_HOME 환경변수 기반으로 전환
 """
+import os
 import sys, sqlite3, hashlib
 from pathlib import Path
 
-BRAIN = Path("/home/user/.nova/brain.db")
-KB    = Path("/home/user/.hermes/kb")
+NOVA_HOME   = Path(os.environ.get("NOVA_HOME",   str(Path.home() / ".nova"))).expanduser()
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+BRAIN = NOVA_HOME / "brain.db"
+KB    = HERMES_HOME / "kb"
 
 
 def _page_id(path_str: str) -> str:

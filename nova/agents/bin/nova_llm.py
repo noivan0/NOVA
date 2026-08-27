@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """nova_llm.py — NOVA LLM 공용 헬퍼 (모든 nova_ 스크립트에서 import)
 
-정상 엔드포인트: https://internal-llm-gateway.example.com/claude-code/v2/v1/messages
+엔드포인트는 NOVA_HMG_CLAUDE_BASE_URL 환경변수로 지정한다(사내/전용
+게이트웨이 없이 공개 Anthropic API를 쓸 경우 비워두면 SDK 기본
+엔드포인트를 사용).
 anthropic SDK base_url 방식은 SDK 버전에 따라 /v1 중복 추가 문제 있음 → urllib 직접 사용.
 """
 import json
@@ -14,8 +16,14 @@ import yaml
 from pathlib import Path
 
 
-# 정상 확인된 엔드포인트 (2026-06-02)
-CLAUDE_MESSAGES_URL = "https://internal-llm-gateway.example.com/claude-code/v2/v1/messages"
+def _claude_messages_url() -> str:
+    base = os.environ.get("NOVA_HMG_CLAUDE_BASE_URL", "").rstrip("/")
+    if not base:
+        raise RuntimeError(
+            "NOVA_HMG_CLAUDE_BASE_URL 환경변수가 설정되지 않았습니다 — "
+            "사내/전용 Anthropic 호환 게이트웨이 URL을 지정하세요."
+        )
+    return f"{base}/v1/messages"
 
 
 def _get_api_key() -> str:
@@ -69,7 +77,7 @@ def call_llm(prompt: str, max_tokens: int = 500,
     for attempt in range(1, max_attempts + 1):
         try:
             req = urllib.request.Request(
-                CLAUDE_MESSAGES_URL,
+                _claude_messages_url(),
                 data=payload,
                 headers={
                     "x-api-key": key,
@@ -106,9 +114,12 @@ def get_llm_client(model: str = "claude-sonnet-5"):
         import anthropic
         import httpx
         key = _get_api_key()
+        base = os.environ.get("NOVA_HMG_CLAUDE_BASE_URL", "").rstrip("/")
+        if not base:
+            return None
         return anthropic.Anthropic(
             api_key=key,
-            base_url="https://internal-llm-gateway.example.com/claude-code/v2",
+            base_url=base,
             http_client=httpx.Client(
                 verify=False,
                 timeout=httpx.Timeout(90.0, connect=10.0)

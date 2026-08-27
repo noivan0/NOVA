@@ -108,6 +108,65 @@ All 14 NOVA tests use the echo provider — no API key required.
 
 ---
 
+### General-purpose gateways (preset providers, 2026-08-28+)
+
+These provider names resolve to their public API `base_url` automatically —
+no need to look up or type the endpoint yourself. They all reuse the
+OpenAI-compatible client under the hood (same code path as `custom`), so
+existing `hmg` / `codex` / `openai` / `anthropic` / `ollama` / `echo` setups
+are completely unaffected.
+
+| Provider name | Service |
+| --- | --- |
+| `groq` | Groq (LPU ultra-fast inference: Llama/Mixtral/Gemma) |
+| `deepseek` | DeepSeek official API |
+| `mistral` | Mistral AI official API |
+| `xai` | xAI Grok official API |
+| `moonshot` | Moonshot Kimi official API |
+| `zhipu` | Zhipu GLM official API |
+| `openrouter` | OpenRouter (hundreds of models via one gateway) |
+| `together` | Together AI (open-model hosting) |
+| `fireworks` | Fireworks AI (open-model hosting) |
+| `perplexity` | Perplexity (web-search-grounded models) |
+
+```bash
+NOVA_LLM_PROVIDER=groq
+NOVA_LLM_MODEL=llama-3.3-70b-versatile
+NOVA_LLM_API_KEY=***
+```
+
+Setting `NOVA_LLM_BASE_URL` explicitly always overrides the preset URL —
+useful for self-hosted or region-specific mirrors of the same API.
+
+See `nova/providers/llm.py::GATEWAY_PRESETS` for the exact URLs, and add
+your own entry there (one line) to support additional gateways.
+
+---
+
+### Fallback chain (multi-provider, 2026-08-28+)
+
+Chain several provider/model pairs together — if one fails (auth error,
+rate limit, network issue), NOVA automatically tries the next:
+
+```bash
+NOVA_LLM_FALLBACK_CHAIN="hmg:claude-sonnet-4-6,groq:llama-3.3-70b-versatile,ollama:llama3.3"
+NOVA_LLM_API_KEY=***   # shared across all chain entries (single master key)
+```
+
+```python
+from nova.providers.llm import get_fallback_chain_from_env
+chain = get_fallback_chain_from_env()  # None if NOVA_LLM_FALLBACK_CHAIN unset
+if chain:
+    output = chain.complete("your prompt")
+```
+
+This is opt-in: existing single-provider code paths (`get_llm_provider(cfg)`)
+are completely unchanged. `get_fallback_chain_from_env()` returns `None`
+when the environment variable is unset, so nothing changes unless you
+explicitly configure a chain.
+
+---
+
 ## Notifier Providers
 
 ### None (default)

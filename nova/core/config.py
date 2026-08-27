@@ -44,23 +44,35 @@ class PublisherConfig:
 
 @dataclass
 class CodexConfig:
-    """HMG Codex (GPT-5.4) 보조 LLM 설정"""
+    """보조 LLM(코드 리뷰/감사용 2차 모델) 설정.
+
+    base_url 기본값은 비워둔다 — 사내/전용 게이트웨이를 쓰는 경우
+    NOVA_CODEX_BASE_URL 환경변수 또는 nova.yaml codex.base_url로 반드시
+    지정해야 한다. 공개 OpenAI를 그대로 쓰려면 비워두면 openai SDK 기본
+    엔드포인트(api.openai.com)를 사용한다.
+    """
     provider: str = "openai"
-    model: str = "gpt-5.4"
+    model: str = "gpt-4o"
     api_key: str = ""
-    base_url: Optional[str] = "https://internal-llm-gateway.example.com/codex-cli/v2"
+    base_url: Optional[str] = None
     max_tokens: int = 4096
     temperature: float = 0.7
 
 
 @dataclass
 class ImageGenConfig:
-    """HMG Gemini 이미지 생성 설정"""
-    provider: str = "hmg_gemini"
-    model: str = "gemini-3.1-flash-image-preview"
-    fallback_model: str = "gemini-3-pro-image-preview"
-    api_key: str = ""   # 마스터 키와 동일; 비어있으면 NOVA_LLM_API_KEY 사용
-    base_url: str = "https://internal-api-gateway.example.com/hchat-in/api/v3/models"
+    """이미지 생성 설정.
+
+    base_url 기본값은 비워둔다 — 사내/전용 게이트웨이를 쓰는 경우
+    NOVA_IMAGE_GEN_BASE_URL 환경변수 또는 nova.yaml image_gen.base_url로
+    반드시 지정해야 한다.
+    """
+    provider: str = "openai_image"
+    model: str = "gpt-image-1"
+    fallback_model: str = ""
+    api_key: str = ""   # 비어있으면 NOVA_LLM_API_KEY 사용
+    base_url: str = ""
+    fallback_base_url: str = ""
 
 
 @dataclass
@@ -68,10 +80,10 @@ class KBConfig:
     path: str = "./kb"
     auto_record: bool = True
     embedding_enabled: bool = False
-    embedding_provider: str = "hmg_openai"
+    embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-large"
-    embedding_base_url: str = "https://internal-api-gateway.example.com/hchat-in/api/v3/openai/deployments"
-    embedding_api_key: str = ""   # 마스터 키와 동일; 비어있으면 NOVA_LLM_API_KEY 사용
+    embedding_base_url: str = ""   # 비어있으면 embedding_provider SDK 기본 엔드포인트 사용
+    embedding_api_key: str = ""   # 비어있으면 NOVA_LLM_API_KEY 사용
 
 
 @dataclass
@@ -171,6 +183,7 @@ def _apply_yaml(cfg: NOVAConfig, raw: dict) -> None:
         cfg.image_gen.fallback_model = ig.get("fallback_model", cfg.image_gen.fallback_model)
         cfg.image_gen.api_key = ig.get("api_key", cfg.image_gen.api_key)
         cfg.image_gen.base_url = ig.get("base_url", cfg.image_gen.base_url)
+        cfg.image_gen.fallback_base_url = ig.get("fallback_base_url", cfg.image_gen.fallback_base_url)
 
     if "llm" in raw:
         llm_cfg = raw["llm"]
@@ -270,11 +283,13 @@ def _apply_env(cfg: NOVAConfig) -> None:
     if v := env("NOVA_CODEX_MODEL"):
         cfg.codex.model = v
 
-    # Image Gen (HMG Gemini)
+    # Image Gen (HMG, 2026-08-11: gpt-image-2 메인)
     if v := env("NOVA_IMAGE_GEN_API_KEY") or env("NOVA_LLM_API_KEY"):
         cfg.image_gen.api_key = v
     if v := env("NOVA_IMAGE_GEN_BASE_URL"):
         cfg.image_gen.base_url = v
+    if v := env("NOVA_IMAGE_GEN_FALLBACK_BASE_URL"):
+        cfg.image_gen.fallback_base_url = v
     if v := env("NOVA_IMAGE_GEN_MODEL"):
         cfg.image_gen.model = v
     if v := env("NOVA_IMAGE_GEN_FALLBACK_MODEL"):
