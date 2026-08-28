@@ -2,6 +2,49 @@
 
 ---
 
+## v1.8.0 — Opt-in MCP server for brain.db (2026-08-28)
+
+Adds the ability to share `brain.db` with other local agents (Claude Code,
+Codex, etc.) over MCP — safely, with two hardcoded guarantees rather than
+configurable options.
+
+Motivated by comparing against garrytan/gbrain (29,205 stars), which exposes
+its brain over MCP as a core feature. The user raised a direct and correct
+concern before any code was written: "if I do that, can outside people see
+my brain.db?" This release answers that concern with enforced defaults
+rather than documentation promises.
+
+### Added
+- **`nova/mcp/server.py`** — a new MCP server exposing exactly two read-only
+  tools: `nova_kb_search_public` and `nova_kb_list_public`.
+  - **stdio transport only.** No SSE or streamable-HTTP code path exists in
+    this file — verified by a test that greps the module source for those
+    calls and fails if found, not just by comment.
+  - **Whitelist (opt-in), enforced at the SQL layer.** A page is only ever
+    returned if the user tagged it `mcp:public` themselves. Untagged pages
+    (the default — verified against the live brain.db: 0 of 2059 pages are
+    currently tagged) are never returned, even if the search query matches
+    their title exactly. The WHERE clause requiring the exact tag token is
+    baked into the query itself, not filtered after the fact in Python, so
+    an application-layer bug can't leak data.
+- **`nova/kernel/mcp_visibility.py`** — the whitelist policy as a pure,
+  independently-testable module (`is_mcp_visible`, `filter_visible_pages`,
+  `filter_visible_takes`). 12 tests including SQL-injection neutralization
+  and orphan-record safe-defaulting.
+- 11 additional tests in `tests/unit/test_mcp_server.py` verifying exact
+  page counts, similar-but-wrong tag rejection (`mcp:public-ish` must NOT
+  match), and that the read-only connection rejects writes outright.
+- New optional dependency group `nova-orchestrator[mcp]` (`mcp>=2.0`).
+- README section documenting the two safety guarantees and how to tag a
+  page shareable.
+
+### Audit
+- Full suite re-run: 252 passed locally; 250 passed + 2 legitimately-skipped
+  under simulated CI HOME (45.9% coverage vs 42% gate).
+- Full internal-info re-scan post-change — clean.
+
+---
+
 ## v1.7.0 — gstack safety parity: careful gate, scope drift, Fix-First heuristic (2026-08-28)
 
 Closes 3 gaps found by a precise re-audit against garrytan/gstack

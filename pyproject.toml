@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nova-orchestrator"
-version = "1.7.0"
+version = "1.8.0"
 description = "NOVA — Autonomous AI Orchestration Framework: declarative pipelines + event-driven autonomy"
 readme = "README.md"
 license = "MIT"
@@ -31,13 +31,15 @@ openai = ["openai>=2.0"]
 anthropic = ["anthropic>=0.97"]
 ollama = ["ollama>=0.6"]
 redis = ["redis>=5.0"]
-all = ["openai>=2.0", "anthropic>=0.97", "ollama>=0.6", "redis>=5.0"]
+mcp = ["mcp>=2.0"]
+all = ["openai>=2.0", "anthropic>=0.97", "ollama>=0.6", "redis>=5.0", "mcp>=2.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
     "openai>=2.0",
     "anthropic>=0.97",
     "ollama>=0.6",
+    "mcp>=2.0",
     "black",
     "ruff",
     "mypy",

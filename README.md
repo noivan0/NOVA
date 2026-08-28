@@ -6,7 +6,7 @@ NOVA runs 24/7 without timers. It watches its own memory (SQLite DB), detects ch
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.7.0-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.8.0-orange)](CHANGELOG.md)
 
 ---
 
@@ -167,6 +167,39 @@ L5 kb           Markdown KB pages
 L6 wiki         Cross-linked concept wiki
 L7 resources    External collected data
 L8 chain        Agent chain execution logs
+```
+
+---
+
+## Sharing your brain with other agents (MCP) — opt-in only
+
+NOVA can expose `brain.db` to other local agents (Claude Code, Codex, etc.)
+over MCP (Model Context Protocol). **This is off by default and nothing is
+shared unless you explicitly tag it.**
+
+```bash
+pip install "nova-orchestrator[mcp]"
+claude mcp add nova -- python3 -m nova.mcp.server --brain-db ~/.nova/brain.db
+```
+
+Two safety guarantees are hardcoded, not configurable:
+
+- **stdio-only, no network exposure.** The server only ever runs as a local
+  subprocess talking over stdin/stdout — there is no HTTP/SSE listener
+  anywhere in `nova/mcp/server.py`. It cannot be reached from outside your
+  machine.
+- **Whitelist (opt-in), not a blacklist filter.** A page is shared only if
+  you tag it `mcp:public` yourself — untagged pages (the default for
+  everything) are never returned by either tool the server exposes
+  (`nova_kb_search_public`, `nova_kb_list_public`). This is enforced at the
+  SQL query level, not just in application code (defense in depth). If your
+  brain has real business/personal data mixed in with reusable knowledge —
+  which is the common case — nothing leaks until you say so, one page at a
+  time.
+
+```bash
+# Mark a page shareable (tags column, comma-separated):
+sqlite3 ~/.nova/brain.db "UPDATE pages SET tags = 'mcp:public' WHERE path = 'kb/concepts/some-generic-note.md'"
 ```
 
 ---
