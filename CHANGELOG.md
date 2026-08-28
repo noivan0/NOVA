@@ -2,7 +2,59 @@
 
 ---
 
-## v1.6.0 — Gap-closing: Deterministic-First gates, budgeted interrupts, 3-judge panel (2026-08-28)
+## v1.7.0 — gstack safety parity: careful gate, scope drift, Fix-First heuristic (2026-08-28)
+
+Closes 3 gaps found by a precise re-audit against garrytan/gstack
+(130,063 stars) after a prior claim of "gstack patterns ported" turned out
+to be docstring-only in places. Every item below is backed by working code
+and passing tests, not prompt text.
+
+### Added
+- **`nova/kernel/careful.py`** — gstack `/careful` parity. Detects
+  destructive commands (`rm -rf /`, force-push to main/master, `DROP TABLE`,
+  `dd` to a block device, `mkfs`, `git reset --hard`, etc.) before any
+  `executor: shell` / `executor: python` harness phase runs a command.
+  HIGH-risk patterns are hard-blocked (no override); MEDIUM-risk patterns
+  warn but proceed by default. New `NOVAConfig.careful_enabled` /
+  `careful_allow_medium_override` (both default `True`, opt-out via
+  `NOVA_CAREFUL_ENABLED=false` / YAML). 25 new tests, including an
+  integration test proving `subprocess.run()` is never reached for a
+  blocked command.
+- **`nova/kernel/scope_drift.py`** — gstack Scope Drift Detection parity
+  ("did we only change what we intended?"). Extracts file/directory hints
+  from a task's requirements text and flags any changed file outside that
+  scope. Wired into the `code_implement` harness as a new
+  `scope_drift_check` phase whose result now appears in the harness's
+  `dod_verify` report (`SCOPE_DRIFT=DETECTED|none`). Conservative by
+  design: if no scope hint is found in the task text, no drift is
+  reported. 12 new tests.
+- **`nova/kernel/fix_first.py`** — gstack Fix-First Heuristic, now enforced
+  in code instead of only requested via an LLM prompt. `nova_codex_gate.py`
+  (both `bin/` and `scripts/` copies) now asks the L2 auditor model for a
+  numeric confidence (0-100) per missed issue, and NOVA classifies it
+  itself: 95+ → `auto_fix`, 85-94 → `critical`, below 85 (or unparseable) →
+  `informational`. The LLM no longer self-reports its own tier. 11 new
+  tests.
+
+### Fixed
+- Previous "gstack patterns ported" claim in `nova_codex_gate.py` docstrings
+  was partially inaccurate — Scope Drift Detection and Fix-First Heuristic
+  were mentioned in comments but had no corresponding code. This release
+  makes both real.
+
+### Audit
+- Re-ran the full test suite before and after: 229 passed locally, 227
+  passed + 2 legitimately-skipped under a simulated CI `HOME` (`45.8%`
+  coverage, gate at 42%).
+- Cross-checked all 46 existing `executor: shell`/`executor: python` phases
+  across all 21 harnesses against the new careful gate — zero false
+  positives.
+- Full internal-info re-scan across the whole repo after the change —
+  clean (only a self-audit assertion string matches, which is intentional).
+
+---
+
+## v1.6.0 — Deterministic-First gates, budgeted interrupts, 3-judge panel (2026-08-28)
 
 Implements three concrete recommendations from a comparison against
 oh-my-hermes and gbrain/gstack/langgraph design patterns.

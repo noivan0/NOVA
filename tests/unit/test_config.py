@@ -114,3 +114,51 @@ def test_dry_run_env_variants():
                 os.environ.pop("NOVA_DRY_RUN", None)
             else:
                 os.environ["NOVA_DRY_RUN"] = old
+
+
+def test_careful_defaults_are_safe_by_default():
+    """careful_enabled/allow_medium_override는 기본값이 안전 쪽(둘 다 True)
+    이어야 한다 — 기존 사용자가 아무 것도 안 바꿔도 위험명령 탐지가 켜져
+    있어야 gstack `/careful` parity 도입이 opt-in이 아닌 안전기본값이 된다."""
+    cfg = NOVAConfig()
+    assert cfg.careful_enabled is True
+    assert cfg.careful_allow_medium_override is True
+
+
+def test_careful_enabled_env_override():
+    old = os.environ.get("NOVA_CAREFUL_ENABLED")
+    os.environ["NOVA_CAREFUL_ENABLED"] = "false"
+    try:
+        cfg = load_config("/nonexistent/nova.yaml")
+        assert cfg.careful_enabled is False
+    finally:
+        if old is None:
+            os.environ.pop("NOVA_CAREFUL_ENABLED", None)
+        else:
+            os.environ["NOVA_CAREFUL_ENABLED"] = old
+
+
+def test_careful_allow_medium_override_env_override():
+    old = os.environ.get("NOVA_CAREFUL_ALLOW_MEDIUM_OVERRIDE")
+    os.environ["NOVA_CAREFUL_ALLOW_MEDIUM_OVERRIDE"] = "false"
+    try:
+        cfg = load_config("/nonexistent/nova.yaml")
+        assert cfg.careful_allow_medium_override is False
+    finally:
+        if old is None:
+            os.environ.pop("NOVA_CAREFUL_ALLOW_MEDIUM_OVERRIDE", None)
+        else:
+            os.environ["NOVA_CAREFUL_ALLOW_MEDIUM_OVERRIDE"] = old
+
+
+def test_careful_settings_from_yaml():
+    yaml_content = "careful_enabled: false\ncareful_allow_medium_override: false\n"
+    fd, path = tempfile.mkstemp(suffix=".yaml")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(yaml_content)
+        cfg = load_config(path)
+        assert cfg.careful_enabled is False
+        assert cfg.careful_allow_medium_override is False
+    finally:
+        os.unlink(path)

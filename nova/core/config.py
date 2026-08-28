@@ -107,6 +107,10 @@ class NOVAConfig:
     evolution_enabled: bool = True
     dry_run: bool = False
 
+    # Safety (gstack `/careful` parity — see nova.kernel.careful)
+    careful_enabled: bool = True          # False면 위험명령 검사 자체를 건너뜀
+    careful_allow_medium_override: bool = True  # False면 MEDIUM 위험도 차단
+
 
 def load_config(config_path: str = "nova.yaml") -> NOVAConfig:
     """
@@ -156,6 +160,10 @@ def _apply_yaml(cfg: NOVAConfig, raw: dict) -> None:
         cfg.evolution_enabled = bool(raw["evolution_enabled"])
     if "dry_run" in raw:
         cfg.dry_run = bool(raw["dry_run"])
+    if "careful_enabled" in raw:
+        cfg.careful_enabled = bool(raw["careful_enabled"])
+    if "careful_allow_medium_override" in raw:
+        cfg.careful_allow_medium_override = bool(raw["careful_allow_medium_override"])
 
     if "kb" in raw:
         kb = raw["kb"]
@@ -226,6 +234,10 @@ def _apply_env(cfg: NOVAConfig) -> None:
         cfg.quality_threshold = int(v)
     if v := env("NOVA_DRY_RUN"):
         cfg.dry_run = v.lower() in ("true", "1", "yes")
+    if v := env("NOVA_CAREFUL_ENABLED"):
+        cfg.careful_enabled = v.lower() in ("true", "1", "yes")
+    if v := env("NOVA_CAREFUL_ALLOW_MEDIUM_OVERRIDE"):
+        cfg.careful_allow_medium_override = v.lower() in ("true", "1", "yes")
 
     # LLM
     if v := env("NOVA_LLM_PROVIDER"):

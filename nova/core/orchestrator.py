@@ -34,6 +34,7 @@ from nova.core.config import NOVAConfig
 from nova.core.evolution import EvolutionLog
 from nova.core.harness import HarnessDefinition, PhaseDefinition
 from nova.core.kb import KB
+from nova.kernel.careful import CarefulViolation, check_command
 from nova.providers.llm import get_llm_provider
 from nova.providers.notifier import get_notifier
 from nova.providers.publisher import get_publisher
@@ -563,6 +564,22 @@ class Orchestrator:
         for k, v in context.items():
             cmd = cmd.replace(f"{{{{{k}}}}}", str(v))
 
+        # gstack `/careful` parity — 임의 셸 명령 실행 전 파괴적 패턴 검사.
+        # HIGH 위험은 config와 무관하게 항상 차단(CarefulViolation),
+        # MEDIUM은 careful_allow_medium_override에 따라 경고만 하거나 차단.
+        if self.config.careful_enabled:
+            try:
+                finding = check_command(
+                    cmd, allow_medium_override=self.config.careful_allow_medium_override
+                )
+                if finding is not None:
+                    print(
+                        f"[nova][careful] MEDIUM-risk command allowed with warning: "
+                        f"{finding.pattern_name} — {finding.reason} (matched: {finding.matched_text!r})"
+                    )
+            except CarefulViolation as e:
+                return PhaseResult(phase.id, False, error=str(e))
+
         if self.config.dry_run:
             print(f"[nova][dry-run] shell: {cmd}")
             return PhaseResult(phase.id, True, output="[dry-run]")
@@ -587,6 +604,21 @@ class Orchestrator:
     ) -> PhaseResult:
         """Execute inline Python code defined in phase.command."""
         import signal
+
+        # gstack `/careful` parity — 인라인 Python 코드도 subprocess/os.system
+        # 등을 통해 동일한 파괴적 명령을 실행할 수 있으므로 동일 검사를 적용.
+        if self.config.careful_enabled:
+            try:
+                finding = check_command(
+                    phase.command, allow_medium_override=self.config.careful_allow_medium_override
+                )
+                if finding is not None:
+                    print(
+                        f"[nova][careful] MEDIUM-risk command allowed with warning: "
+                        f"{finding.pattern_name} — {finding.reason} (matched: {finding.matched_text!r})"
+                    )
+            except CarefulViolation as e:
+                return PhaseResult(phase.id, False, error=str(e))
 
         local_vars: Dict[str, Any] = {"workspace": workspace, "context": context, "output": ""}
 

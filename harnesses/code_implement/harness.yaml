@@ -69,6 +69,54 @@ phases:
       }
       output = json.dumps(result, ensure_ascii=False, indent=2)
 
+  - id: scope_drift_check
+    name: "Scope Drift Detection (gstack parity) — 의도한 것만 변경했나?"
+    executor: python
+    on_failure: skip
+    timeout: 15
+    output_file: scope_drift.json
+    description: "extracted_files.json의 파일 목록을 analysis.md 요구사항 텍스트와 대조해 범위 이탈 여부를 결정론적으로 검사. LLM 판단을 대체하지 않고 보완 — 범위이탈이 감지되면 review 단계에서 사람/LLM이 재확인하도록 신호만 제공."
+    script: |
+      import json, sys, os
+      from pathlib import Path
+      nova_home = Path(os.environ.get('NOVA_HOME', str(Path.home()/'.nova'))).expanduser()
+      ws = nova_home / 'workspace' / 'code_implement'
+
+      # nova 패키지 경로 (repo 상대 — CI/로컬 어디서든 동작)
+      _repo_candidates = [
+          Path(__file__).resolve().parents[3] if '__file__' in dir() else None,
+          nova_home.parent / 'nova',
+      ]
+      for _c in _repo_candidates:
+          if _c and (_c / 'nova' / 'kernel' / 'scope_drift.py').exists():
+              sys.path.insert(0, str(_c))
+              break
+
+      try:
+          from nova.kernel.scope_drift import check_scope_drift
+      except ImportError as e:
+          output = json.dumps({'error': f'scope_drift module unavailable: {e}', 'has_drift': False})
+      else:
+          analysis_path = ws / 'analysis.md'
+          task_desc = analysis_path.read_text(errors='replace') if analysis_path.exists() else ''
+
+          extracted_path = ws / 'extracted_files.json'
+          changed_files = []
+          if extracted_path.exists():
+              try:
+                  extracted = json.loads(extracted_path.read_text())
+                  changed_files = extracted.get('files_written', [])
+              except Exception:
+                  pass
+
+          result = check_scope_drift(task_desc, changed_files)
+          output = json.dumps({
+              'has_drift': result.has_drift,
+              'in_scope': result.in_scope,
+              'out_of_scope': result.out_of_scope,
+              'allowed_patterns': result.allowed_patterns,
+          }, ensure_ascii=False, indent=2)
+
   - id: dod_verify
     name: "DoD 키워드 출력 (체인 게이트 통과)"
     executor: python
@@ -90,12 +138,26 @@ phases:
               extracted = {}
       files_count = extracted.get('count', 0)
       artifact_line = f'ARTIFACT_FILES={files_count}\n' if files_count > 0 else 'ARTIFACT_FILES=0 (WARN: no source files extracted to disk)\n'
+
+      scope_line = 'SCOPE_DRIFT=unknown (scope_drift_check phase 미실행)\n'
+      sdf = ws / 'scope_drift.json'
+      if sdf.exists():
+          try:
+              sd = json.loads(sdf.read_text())
+              if sd.get('has_drift'):
+                  scope_line = f"SCOPE_DRIFT=DETECTED — out_of_scope={sd.get('out_of_scope', [])} (review 단계에서 재확인 필요)\n"
+              else:
+                  scope_line = 'SCOPE_DRIFT=none\n'
+          except Exception:
+              pass
+
       # output 변수에 내용 설정 → orchestrator가 output_file(report.md)에 씀
       output = (
           '## DoD 검증\n'
           'py_compile: OK\n'
           'IMPORT OK\n'
           + artifact_line
+          + scope_line
           + 'code implementation complete\n\n'
           '## 구현 내용\n\n'
           + impl[:1500]

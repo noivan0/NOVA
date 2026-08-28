@@ -18,6 +18,16 @@ import os, sys, json, time, uuid, subprocess, logging, tempfile
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent
+
+# nova.kernel.fix_first — Fix-First Heuristic 실제 코드 분류 (2026-08-28 추가)
+sys.path.insert(0, str(BASE.parent.parent))
+try:
+    from nova.kernel.fix_first import classify_findings
+except ImportError:
+    def classify_findings(findings: list) -> list:  # type: ignore
+        """nova 패키지 미탑재 환경 폴백 — 원본 그대로 반환(분류 없음)."""
+        return findings
+
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 # 환경변수 우선 → 헤르 메인/헤르2 양쪽에서 동작
 # 헤르 메인: /root/.hermes/ipc/{main_to_sub,sub_to_main}
@@ -327,13 +337,16 @@ def gpt_audit(project: str, content: str, claude_result: dict) -> dict:
     system_msg = f"""You are Layer-2 independent auditor for {project} (GPT-5.4).
 Your job: find what Claude MISSED or got WRONG.
 Project criteria: {criteria}
+For each issue in new_critical_issues, report a numeric confidence (0-100).
+NOVA will classify 95+ as auto-fixable, 85-94 as critical, below 85 as
+informational in code — you only report an honest confidence per issue.
 Output JSON only:
 {{
   "score_adjustment": <-20 to +10>,
   "verdict": "APPROVED" | "REQUEST_CHANGES" | "ABORT",
   "confirmed_by_gpt": ["what Claude got right"],
   "overruled_by_gpt": ["what Claude got wrong"],
-  "new_critical_issues": ["issues Claude missed"],
+  "new_critical_issues": [{{"issue": "issue Claude missed", "confidence": <0-100>}}],
   "reviewer": "gpt-5.4"
 }}"""
 
@@ -360,6 +373,14 @@ Output JSON only:
             parsed = _extract_json_from_text(raw)
             result = json.loads(parsed)
             result["reviewer"] = "gpt-5.4"
+            # Fix-First Heuristic 실제 코드 분류 (2026-08-28 추가) —
+            # LLM이 보고한 confidence를 NOVA가 직접 파싱해 재분류한다.
+            new_issues = result.get("new_critical_issues", [])
+            new_issues_normalized = [
+                {"issue": i} if isinstance(i, str) else i
+                for i in new_issues
+            ]
+            result["new_critical_issues"] = classify_findings(new_issues_normalized)
             return result
         else:
             return _gpt_fallback(claude_result, f"HTTP {resp.status_code}")

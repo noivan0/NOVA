@@ -27,6 +27,15 @@ import os, sys, json, time, uuid, concurrent.futures, logging
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent
+
+# nova.kernel.fix_first — Fix-First Heuristic 실제 코드 분류 (2026-08-28 추가)
+sys.path.insert(0, str(BASE.parent.parent))
+try:
+    from nova.kernel.fix_first import classify_findings
+except ImportError:
+    def classify_findings(findings: list) -> list:  # type: ignore
+        """nova 패키지 미탑재 환경 폴백 — 원본 그대로 반환(분류 없음)."""
+        return findings
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 IPC_OUT = Path("/workspace/ipc/sub_to_main")
 IPC_IN  = Path("/workspace/ipc/main_to_sub")
@@ -265,7 +274,10 @@ def gpt_audit(project: str, content: str, claude_result: dict) -> dict:
 IMPORTANT: You are completely independent from Claude's Layer-1 review.
 Apply gstack adversarial review principles:
 - Find what Claude MISSED (assume Claude was too lenient)
-- Apply Fix-First Heuristic: 95%+ confidence → flag as critical, below 85% → informational
+- Apply Fix-First Heuristic: report a numeric confidence (0-100) for EACH
+  missed issue. NOVA will classify 95+ as auto-fixable, 85-94 as critical,
+  below 85 as informational — this classification happens in code, not by
+  you, so your job is only to report an honest confidence number per issue.
 - Iron Law: if you cannot justify a finding with evidence, do NOT flag it
 
 Claude L1 findings for context (do NOT simply agree):
@@ -276,7 +288,7 @@ Your output (JSON only, no other text):
 {{
   "verdict": "APPROVED" | "REQUEST_CHANGES" | "ABORT",
   "score_adjustment": <integer -20 to +20>,
-  "missed_by_claude": ["specific issue Claude missed"],
+  "missed_by_claude": [{{"issue": "specific issue Claude missed", "confidence": <0-100>}}],
   "confirmed_by_gpt": ["Claude was RIGHT about this"],
   "overruled_by_gpt": ["Claude was WRONG about this"],
   "final_recommendation": "one sentence",
@@ -320,6 +332,18 @@ Your output (JSON only, no other text):
         if "truncated" in str(final_rec).lower() or result.get("verdict") == "ABORT" and "truncated" in str(result).lower():
             logger.warning(f"[L2 GPT-5.4] truncated 응답 감지 → Claude 폴백")
             return _gpt_fallback_claude(project, content, claude_result)
+        # Fix-First Heuristic 실제 코드 분류 — LLM이 보고한 confidence를
+        # NOVA가 직접 파싱해 auto_fix/critical/informational로 분류한다.
+        # (LLM에게 "이렇게 분류해줘"라고 프롬프트로 부탁만 하던 이전 방식과
+        # 달리, 여기서는 코드가 강제로 재분류하므로 LLM이 규칙을 어겨도
+        # 최종 분류는 항상 일관된다.)
+        missed = result.get("missed_by_claude", [])
+        # 하위호환: 이전 버전 프롬프트가 문자열 배열을 반환할 수도 있음
+        missed_normalized = [
+            {"issue": m} if isinstance(m, str) else m
+            for m in missed
+        ]
+        result["missed_by_claude"] = classify_findings(missed_normalized)
         result["reviewer"] = "gpt-5.6-terra"
         result["latency"] = latency
         _record_ct_tl(project, "L2-gpt",
