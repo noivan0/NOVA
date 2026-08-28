@@ -560,9 +560,35 @@ class Orchestrator:
         context: Dict[str, Any],
         timeout: int,
     ) -> PhaseResult:
+        # SECURITY (2026-08-28): 과거에는 context 값(특히 이전 LLM phase의
+        # raw 출력 — context["_phase_x"] = result.output)을 `cmd.replace(
+        # "{{key}}", str(v))`로 셸 명령 문자열에 직접 문자열치환했다.
+        # 실제로 재현 확인: 프롬프트 인젝션 등으로 조작된 LLM 출력이 명령
+        # 구분자(", ', ;, $(), 개행 등)를 깨고 임의 명령을 실행시킬 수
+        # 있었다 — Black Hat 2026 Check Point 리서치가 LangChain/CrewAI/
+        # AutoGen 등 주요 에이전트 프레임워크에서 지적한 것과 동일한
+        # 클래스의 결함("prompt-controlled content crossing into trusted
+        # framework logic"). shlex.quote()로 감싸는 완화책도 시도했으나,
+        # harness 작성자가 이미 자체 인용부호로 값을 감싼 경우(예:
+        # `echo "{{x}}"`) 이중 인용이 깨지는 것까지는 막지 못함을 실측
+        # 재현으로 확인했다.
+        #
+        # 근본 수정: `{{key}}` 문자열 템플릿 치환을 셸 명령 조립에서
+        # 완전히 제거한다. 실제 21개 harness 전수조사 결과 executor:shell
+        # phase가 이 템플릿을 쓰는 사례는 0건이었으므로 제거해도 하위호환
+        # 문제가 없다. 이전 phase의 결과가 필요한 harness는 대신
+        # NOVA_CTX_<KEY> 환경변수(아래)를 읽도록 작성해야 한다 — 환경변수는
+        # 셸이 명령 문자열을 "파싱"하는 단계 이후에 값이 통째로 전달되므로,
+        # 값 안에 어떤 인용부호/구분자/개행이 있어도 명령 구조 자체를
+        # 바꿀 수 없다(변수 확장 표기 `$NOVA_CTX_X`를 command 안에 직접
+        # 쓰지 않는 한 셸이 그 내용을 재해석하지 않는다).
         cmd = phase.command
+
+        env = dict(os.environ)
         for k, v in context.items():
-            cmd = cmd.replace(f"{{{{{k}}}}}", str(v))
+            # 환경변수 이름 규칙: 영숫자/언더스코어만 허용, 나머지는 치환
+            safe_key = "".join(c if c.isalnum() or c == "_" else "_" for c in str(k)).upper()
+            env[f"NOVA_CTX_{safe_key}"] = str(v)
 
         # gstack `/careful` parity — 임의 셸 명령 실행 전 파괴적 패턴 검사.
         # HIGH 위험은 config와 무관하게 항상 차단(CarefulViolation),
@@ -587,7 +613,7 @@ class Orchestrator:
         try:
             proc = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True,  # nosec B602 — harness-defined cmd only, no user input
-                timeout=timeout, cwd=str(workspace)
+                timeout=timeout, cwd=str(workspace), env=env,
             )
             success = proc.returncode == 0
             output = proc.stdout + proc.stderr

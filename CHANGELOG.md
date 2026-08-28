@@ -2,6 +2,56 @@
 
 ---
 
+## v1.9.0 — SECURITY: shell command injection via LLM phase output (2026-08-28)
+
+**Severity: High.** Fixes a real, reproduced vulnerability in
+`Orchestrator._exec_shell()`, found while researching Black Hat 2026's
+Check Point disclosure that ~a dozen flaws across LangChain, LangGraph,
+CrewAI, AutoGen, Google ADK, and Microsoft Agent Framework share one root
+cause: prompt-controlled content crossing into trusted framework logic.
+
+### The vulnerability
+`_exec_shell()` interpolated `context` values — including the raw text
+output of a previous `executor: llm` phase (`context["_phase_x"] =
+result.output`) — directly into the shell command string via
+`cmd.replace("{{key}}", str(v))`, then ran it with `subprocess.run(...,
+shell=True)`. If an LLM's output were manipulated (e.g. by prompt
+injection in a document it was asked to summarize) to contain shell
+metacharacters (`"`, `'`, `` ` ``, `$()`, newlines), that content could
+break out of its intended string context and execute arbitrary commands.
+Reproduced live: a crafted LLM-output payload containing `"; touch
+/tmp/pwned; echo "` created the file when interpolated into a harmless
+`echo "{{_phase_analyze}}"` template.
+
+Considered and rejected: wrapping the interpolated value in
+`shlex.quote()`. This mitigates one case (the value being a standalone
+argument) but not another (a harness author already wrapping `{{x}}` in
+their own quotes, e.g. `echo "{{x}}"`) — a double-quoting collision that
+was also reproduced and confirmed still exploitable.
+
+### The fix
+`{{key}}` string-template interpolation into shell commands is removed
+entirely. A full audit of all 21 built-in harnesses' `executor: shell`
+phases found zero uses of this template, so removing it introduces no
+regression. Instead, every `context` value is exposed as a
+`NOVA_CTX_<SANITIZED_KEY>` environment variable: values are handed to the
+subprocess only after the shell has finished parsing the command string,
+so no amount of embedded quoting or metacharacters can alter command
+structure. `executor: python` phases were already safe (context is passed
+as a real Python dict via `exec()`, not string-substituted into source).
+
+### Audit
+- 5 injection payload variants (double-quote, single-quote, backtick,
+  `$()`, embedded newline) reproduced against the vulnerable code and
+  re-run against the fix — all 5 confirmed blocked (no side-effect file
+  created).
+- 9 new regression tests in `tests/unit/test_shell_injection_fix.py`.
+- Full suite re-run: 261 passed locally; 259 passed + 2
+  legitimately-skipped under simulated CI HOME (46% coverage vs 42% gate).
+- Full internal-info re-scan post-change — clean.
+
+---
+
 ## v1.8.0 — Opt-in MCP server for brain.db (2026-08-28)
 
 Adds the ability to share `brain.db` with other local agents (Claude Code,

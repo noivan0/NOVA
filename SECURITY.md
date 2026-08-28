@@ -14,8 +14,26 @@ Please do **not** open a public issue for security vulnerabilities.
 
 | Version | Supported |
 |---------|-----------|
-| 1.3.x   | Yes       |
-| < 1.3   | No        |
+| 1.9.x   | Yes       |
+| < 1.9   | No — see Fixed Vulnerabilities below |
+
+## Fixed Vulnerabilities
+
+### v1.9.0 (2026-08-28) — Shell command injection via LLM phase output (High)
+
+`Orchestrator._exec_shell()` interpolated harness `context` values —
+including the raw output of a previous `executor: llm` phase — directly
+into shell command strings before running them with `shell=True`. If an
+LLM's output contained shell metacharacters (via prompt injection in
+content it processed), it could break out of its intended string context
+and execute arbitrary commands. Fixed by removing `{{key}}` string
+interpolation from shell command assembly entirely; context values are now
+passed exclusively via `NOVA_CTX_<KEY>` environment variables, which the
+shell cannot re-parse. See `CHANGELOG.md` v1.9.0 for the full writeup,
+including the specific injection payloads reproduced and confirmed
+blocked. If you run harnesses whose `executor: shell` phases relied on
+`{{key}}` templates in the `command` field (no built-in harness did),
+update them to read `$NOVA_CTX_<KEY>` instead.
 
 ## Known History Notes
 
