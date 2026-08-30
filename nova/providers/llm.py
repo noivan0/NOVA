@@ -410,7 +410,23 @@ class HMGProvider(LLMProvider):
                         logger.warning("[nova/hmg] HTTP %d — 대체 키 없음", r.status_code)
                 r.raise_for_status()
                 data = r.json()
-                return data["content"][0]["text"]
+                # BUG FIX (2026-08-28, gpt-5.6-terra A/B 벤치마크 중 발견):
+                # claude-sonnet-5는 extended thinking을 사용하면 content[0]이
+                # {"type": "thinking", ...}이고 실제 텍스트는 content[1]
+                # (또는 그 이후)의 {"type": "text", "text": "..."}에 있다.
+                # content[0]["text"]로 하드코딩되어 있으면 thinking 블록에는
+                # "text" 키가 없어 KeyError: 'text'가 발생 — 실측 재현
+                # 확인(동일 프롬프트를 3회 반복 실행해도 100% 재현). type
+                # 필드로 실제 텍스트 블록을 찾아 반환하도록 근본 수정.
+                for block in data.get("content", []):
+                    if block.get("type") == "text":
+                        return block.get("text", "")
+                # 텍스트 블록이 전혀 없는 경우(예: tool_use만 반환) — 명확한
+                # 에러로 실패시켜 원인 파악을 쉽게 한다.
+                raise RuntimeError(
+                    f"HMG API response has no 'text' content block "
+                    f"(block types: {[b.get('type') for b in data.get('content', [])]})"
+                )
             except RuntimeError:
                 raise
             except Exception as e:

@@ -2,6 +2,55 @@
 
 ---
 
+## v1.10.0 — Fix HMGProvider KeyError with extended thinking; shell-quote hardening (2026-08-28)
+
+### Fixed (High — real, reproduced production bug)
+`HMGProvider.chat()` hardcoded `data["content"][0]["text"]` to extract the
+model's reply. When claude-sonnet-5 uses extended thinking, the response's
+`content[0]` is `{"type": "thinking", ...}` and the actual reply lives in
+`content[1]` (or later) as `{"type": "text", "text": "..."}` — so
+`content[0]["text"]` raised `KeyError: 'text'`. Reproduced 100% (3/3) on a
+specific prompt shape during an A/B benchmark against gpt-5.6-terra: this
+is the **default, currently-deployed LLM provider** silently failing on
+certain real prompts, not a hypothetical edge case. Fixed by scanning the
+`content` array for the block with `type == "text"` instead of assuming
+position 0; raises a clear `RuntimeError` if no text block exists at all
+(instead of a cryptic `KeyError`). 5 new regression tests mock the exact
+observed response shape (thinking-then-text, text-only, multiple-thinking,
+tool-use-only, empty).
+
+### Hardened
+- `nova/agents/scripts/nova_autonomous_loop.py`: extended the v1.9.0 shell-
+  injection audit — `board` values were interpolated into shell commands
+  via f-string without escaping. Wrapped in `shlex.quote()` defensively
+  (board comes from a local config file, not LLM output, but the same
+  interpolation pattern deserves the same treatment). Also fixed a latent
+  `NameError` bug: a misplaced shebang left `import os` before the module
+  docstring and `from pathlib import Path` was missing entirely, so the
+  module would crash on `Path.home()` the moment it was imported. 4 new
+  tests.
+- Audited all other `shell=True`/`os.system()` call sites in the codebase
+  (3 total): the RunBook shell-action path in `Orchestrator` was confirmed
+  safe (action string is harness-author-controlled, not LLM output, and no
+  built-in harness uses a shell action).
+
+### Added
+- `/tmp/nova_model_ab_benchmark.py` (not committed, session artifact) — an
+  A/B benchmark comparing the current main model (claude-sonnet-5 via
+  `NOVA_LLM_MODEL`/HMGProvider) against gpt-5.6-terra (via
+  `NOVA_CODEX_MODEL`/CodexResponsesProvider) across 5 tasks representative
+  of real harness phases (structured JSON output, factual QA,
+  summarization), 3 runs each against the live internal gateway. See
+  CHANGELOG discussion / KB for full results and recommendation.
+
+### Audit
+- Full suite re-run: 270 passed locally; 268 passed + 2
+  legitimately-skipped under simulated CI HOME (46.5% coverage vs 42%
+  gate).
+- Full internal-info re-scan post-change — clean.
+
+---
+
 ## v1.9.0 — SECURITY: shell command injection via LLM phase output (2026-08-28)
 
 **Severity: High.** Fixes a real, reproduced vulnerability in
